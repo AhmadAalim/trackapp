@@ -1,0 +1,31 @@
+{
+  "name": "trackapp",
+  "version": "1.0.0",
+  "description": "Store Management Application - Track inventory, sales, employees, suppliers, and finances",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "dev:public": "concurrently \"npm run server\" \"npm run client\" \"npm run tunnel\"",
+    "server": "cd server && nodemon index.js",
+    "client": "cd client && npm start",
+    "build": "cd client && npm run build",
+    "tunnel": "npx localtunnel --port 3000",
+    "tunnel:both": "node start-public.js",
+    "install-server": "cd server && npm install",
+    "install-client": "cd client && npm install",
+    "install-all": "npm install && npm run install-server && npm run install-client"
+  },
+  "keywords": [
+    "store",
+    "management",
+    "inventory",
+    "tracking"
+  ],
+  "author": "Ahmad Aalim",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "localtunnel": "^2.0.2",
+    "nodemon": "^3.0.2"
+  }
+}
