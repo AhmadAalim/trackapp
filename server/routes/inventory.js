@@ -2,6 +2,7 @@ module.exports = (db, upload, uploadImage, path) => {
   const express = require('express');
   const XLSX = require('xlsx');
   const fs = require('fs');
+  const { generateSKUSimple, calculateFinalPrice } = require('../utils/skuGenerator');
   const router = express.Router();
 
   // Auto-categorization helper based on product text
@@ -36,6 +37,71 @@ module.exports = (db, upload, uploadImage, path) => {
     return String(value).trim().toLowerCase();
   };
 
+  // Export inventory to Excel
+  router.get('/export-excel', (req, res) => {
+    db.all('SELECT * FROM products ORDER BY name', (err, products) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+
+      // Prepare data for Excel
+      const worksheetData = products.map(product => ({
+        'Product Code': product.sku || '',
+        'Product Name': product.name || '',
+        'Product Description': product.name || '', // For Excel format compatibility
+        'Product Barcode': product.barcode || product.description || '',
+        'Quantity': product.stock_quantity || product.quantity || 0,
+        'Cost Price': product.cost || product.cost_price || 0,
+        'Final Price': product.price || product.selling_price || 0,
+        'Category': product.category || '',
+        'Min Stock Level': product.min_stock_level || product.min_quantity || 10,
+        'Supplier': product.supplier_id || '',
+      }));
+
+      // Create workbook
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventory');
+
+      // Generate Excel file buffer
+      const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+      // Set response headers
+      const filename = `inventory_export_${new Date().toISOString().split('T')[0]}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+      // Send file
+      res.send(excelBuffer);
+    });
+  });
+
+  // Delete all products - MUST be registered BEFORE any /:id routes
+  // This includes GET /:id, PUT /:id, and DELETE /:id
+  router.delete('/all', (req, res) => {
+    console.log('🔍 DELETE /api/inventory/all - Route matched!');
+    console.log('Request URL:', req.originalUrl);
+    console.log('Request path:', req.path);
+    console.log('Request method:', req.method);
+    
+    // Delete all products from database
+    db.run('DELETE FROM products', function(err) {
+      if (err) {
+        console.error('❌ Database error deleting all products:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
+      const deletedCount = this.changes || 0;
+      console.log(`✅ Successfully deleted ${deletedCount} product(s) from database`);
+      
+      res.status(200).json({ 
+        success: true,
+        message: `All products deleted successfully. ${deletedCount} product${deletedCount !== 1 ? 's' : ''} removed.`,
+        count: deletedCount
+      });
+    });
+  });
+
   // Get all products (with optional search)
   router.get('/', (req, res) => {
     const { search } = req.query;
@@ -54,7 +120,21 @@ module.exports = (db, upload, uploadImage, path) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
-      res.json(rows);
+
+      const formattedRows = rows.map((row) => {
+        const costValue = Number(row.cost !== undefined && row.cost !== null ? row.cost : row.cost_price || 0);
+        const finalPrice = calculateFinalPrice(costValue);
+        const sellingPrice = Number(row.price !== undefined && row.price !== null ? row.price : row.selling_price || 0);
+
+        return {
+          ...row,
+          cost: costValue,
+          final_price: finalPrice,
+          selling_price: sellingPrice,
+        };
+      });
+
+      res.json(formattedRows);
     });
   });
 
@@ -87,7 +167,7 @@ module.exports = (db, upload, uploadImage, path) => {
         console.log('First row sample:', data[0]);
       }
 
-      const results = { success: 0, errors: [] };
+      const results = { success: 0, errors: [], failedRows: [] };
 
       // Process each row - use Promise.all to wait for all inserts
       const insertPromises = data.map((row, index) => {
@@ -147,29 +227,22 @@ module.exports = (db, upload, uploadImage, path) => {
           // Cost Price → cost
           const costPrice = getValue([
             'Cost Price', 'cost price', 'CostPrice', 'Cost', 'cost', 'Purchase Price', 'purchase price',
-            'מחיר עלות', 'עלות' // Hebrew variations
+            'מחיר עלות', 'עלות', 'מחיר לאחר הנחה' // Hebrew variations
           ]);
 
           // Final Price → price
           const finalPrice = getValue([
             'Final Price', 'final price', 'FinalPrice', 'Price', 'price', 'Selling Price', 'selling price',
-            'מחיר סופי', 'מחיר', 'מחיר לאחר הנחה' // Hebrew variations
+            'מחיר סופי', 'מחיר לצרכן', 'צרכן' // Hebrew variations
           ]);
 
-          // Generate SKU: last 4 digits are cost price padded with zeros
-          const cost = parseFloat(costPrice) || 0;
-          const costPadded = Math.floor(cost).toString().padStart(4, '0'); // Last 4 digits: 0025 for 25
-          
-          // Create SKU prefix from product name (first 3-4 uppercase letters) + cost price
-          const namePrefix = productName
-            .replace(/[^a-zA-Z0-9]/g, '') // Remove special characters
-            .substring(0, 4)
-            .toUpperCase()
-            .padEnd(4, 'X'); // Fill with X if name is too short
-          
-          const generatedSku = `${namePrefix}${costPadded}`;
-
+          // Auto-categorize product
           const derivedCategory = categorizeProduct(productName, productBarcode || '');
+
+          // Generate SKU using new format: [CATEGORY_PREFIX][ITEMCODE][COSTPRICE_LAST4]
+          const cost = parseFloat(costPrice) || 0;
+          const calculatedFinalPrice = calculateFinalPrice(cost);
+          const generatedSku = generateSKUSimple(derivedCategory || 'ITEM', cost, null, calculatedFinalPrice);
 
           const product = {
             name: productName, // Product Name goes to name field
@@ -184,6 +257,26 @@ module.exports = (db, upload, uploadImage, path) => {
             image_url: null,
           };
 
+          const recordFailure = (message) => {
+            results.errors.push(message);
+            results.failedRows.push({
+              rowNumber: index + 2,
+              error: message,
+              product: {
+                name: product.name,
+                description: product.description,
+                sku: product.sku,
+                category: product.category,
+                price: product.price,
+                cost: product.cost,
+                stock_quantity: product.stock_quantity,
+                min_stock_level: product.min_stock_level,
+                supplier_id: product.supplier_id,
+                image_url: product.image_url,
+              },
+            });
+          };
+
           console.log(`Row ${index + 2}:`, {
             name: product.name,
             price: product.price,
@@ -192,7 +285,7 @@ module.exports = (db, upload, uploadImage, path) => {
           });
 
           if (!product.name || product.name.trim() === '') {
-            results.errors.push(`Row ${index + 2}: Missing product name`);
+            recordFailure(`Row ${index + 2}: Missing product name`);
             resolve();
             return;
           }
@@ -215,7 +308,7 @@ module.exports = (db, upload, uploadImage, path) => {
               function(updateErr) {
                 if (updateErr) {
                   console.error(`Row ${index + 2} update error:`, updateErr.message);
-                  results.errors.push(`Row ${index + 2}: ${updateErr.message}`);
+                recordFailure(`Row ${index + 2}: ${updateErr.message}`);
                   resolve();
                   return;
                 }
@@ -230,7 +323,7 @@ module.exports = (db, upload, uploadImage, path) => {
           // Function to insert new product (only called if no existing product found)
           const insertProductRow = (skuToUse, retryCount = 0) => {
             if (retryCount > 3) {
-              results.errors.push(`Row ${index + 2}: Failed after multiple SKU conflict attempts`);
+              recordFailure(`Row ${index + 2}: Failed after multiple SKU conflict attempts`);
               resolve();
               return;
             }
@@ -244,11 +337,17 @@ module.exports = (db, upload, uploadImage, path) => {
                   
                   // Handle SKU uniqueness conflict
                   if (err.message.includes('UNIQUE constraint failed: products.sku') && skuToUse && skuToUse !== null) {
-                    const uniqueSku = `${skuToUse}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+                    const randomItemCode = Math.floor(Math.random() * 900) + 100;
+                    const uniqueSku = generateSKUSimple(
+                      product.category || derivedCategory || 'ITEM',
+                      product.cost,
+                      randomItemCode,
+                      calculatedFinalPrice
+                    );
                     console.log(`Row ${index + 2}: SKU conflict, retrying with: ${uniqueSku}`);
                     insertProductRow(uniqueSku, retryCount + 1);
                   } else {
-                    results.errors.push(`Row ${index + 2}: ${err.message}`);
+                    recordFailure(`Row ${index + 2}: ${err.message}`);
                     resolve();
                   }
                 } else {
@@ -312,7 +411,8 @@ module.exports = (db, upload, uploadImage, path) => {
       res.json({
         message: `Import completed: ${results.success} product${results.success !== 1 ? 's' : ''} added${results.errors.length > 0 ? `, ${results.errors.length} error${results.errors.length !== 1 ? 's' : ''}` : ''}`,
         success: results.success,
-        errors: results.errors
+        errors: results.errors,
+        failedRows: results.failedRows,
       });
     } catch (error) {
       if (req.file && fs.existsSync(req.file.path)) {
@@ -333,36 +433,7 @@ module.exports = (db, upload, uploadImage, path) => {
     });
   });
 
-  // Delete all products (must come before /:id route to avoid matching "all" as an ID)
-  router.delete('/all', (req, res) => {
-    console.log('DELETE /api/inventory/all endpoint called');
-    console.log('Request URL:', req.url);
-    console.log('Request path:', req.path);
-    
-    // Verify this is actually the /all route, not /:id
-    if (req.params && req.params.id) {
-      console.error('ERROR: Route matched as /:id instead of /all!');
-      return res.status(500).json({ error: 'Route conflict detected' });
-    }
-    
-    db.run('DELETE FROM products', function(err) {
-      if (err) {
-        console.error('Database error deleting all products:', err);
-        return res.status(500).json({ error: err.message });
-      }
-      
-      const deletedCount = this.changes || 0;
-      console.log(`Successfully deleted all products. Total deleted: ${deletedCount}`);
-      
-      res.status(200).json({ 
-        success: true,
-        message: `All products deleted successfully. ${deletedCount} product${deletedCount !== 1 ? 's' : ''} removed.`,
-        count: deletedCount
-      });
-    });
-  });
-
-  // Get single product (must be last due to /:id parameter)
+  // Get single product (must be after /all route due to /:id parameter)
   router.get('/:id', (req, res) => {
     db.get('SELECT * FROM products WHERE id = ?', [req.params.id], (err, row) => {
       if (err) {
@@ -371,7 +442,17 @@ module.exports = (db, upload, uploadImage, path) => {
       if (!row) {
         return res.status(404).json({ error: 'Product not found' });
       }
-      res.json(row);
+
+      const costValue = Number(row.cost !== undefined && row.cost !== null ? row.cost : row.cost_price || 0);
+      const finalPrice = calculateFinalPrice(costValue);
+      const sellingPrice = Number(row.price !== undefined && row.price !== null ? row.price : row.selling_price || 0);
+
+      res.json({
+        ...row,
+        cost: costValue,
+        final_price: finalPrice,
+        selling_price: sellingPrice,
+      });
     });
   });
 
@@ -384,6 +465,7 @@ module.exports = (db, upload, uploadImage, path) => {
     const productName = name || `Product ${Date.now()}`;
     const productPrice = price !== undefined && price !== null ? parseFloat(price) || 0 : 0;
     const productCost = cost !== undefined && cost !== null ? parseFloat(cost) || 0 : 0;
+    const computedFinalPrice = calculateFinalPrice(productCost);
     const productStock = stock_quantity !== undefined && stock_quantity !== null ? parseInt(stock_quantity) || 0 : 0;
     const productMinStock = min_stock_level !== undefined && min_stock_level !== null ? parseInt(min_stock_level) || 10 : 10;
     
@@ -392,17 +474,8 @@ module.exports = (db, upload, uploadImage, path) => {
       ? category
       : categorizeProduct(productName, description || '');
 
-    // Generate SKU: last 4 digits are cost price padded with zeros
-    const costPadded = Math.floor(productCost).toString().padStart(4, '0'); // Last 4 digits: 0025 for 25
-    
-    // Create SKU prefix from product name (first 4 uppercase letters/numbers)
-    const namePrefix = productName
-      .replace(/[^a-zA-Z0-9]/g, '') // Remove special characters
-      .substring(0, 4)
-      .toUpperCase()
-      .padEnd(4, 'X'); // Fill with X if name is too short
-    
-    const generatedSku = `${namePrefix}${costPadded}`;
+    // Generate SKU using new format: [CATEGORY_PREFIX][ITEMCODE][COSTPRICE_LAST4]
+    const generatedSku = generateSKUSimple(autoCategory || category || 'ITEM', productCost, null, computedFinalPrice);
     
     // Use provided SKU if given, otherwise use generated SKU
     let productSku = sku && sku.trim() !== '' ? sku.trim() : generatedSku;
@@ -413,8 +486,8 @@ module.exports = (db, upload, uploadImage, path) => {
       if (retryCount > 3) {
         return res.status(500).json({ error: 'Failed to create product after multiple attempts' });
       }
-      
-      db.run(
+    
+    db.run(
         'INSERT INTO products (name, description, sku, category, price, cost, stock_quantity, min_stock_level, supplier_id, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           productName,
@@ -428,8 +501,8 @@ module.exports = (db, upload, uploadImage, path) => {
           supplier_id || null,
           image_url || null
         ],
-        function(err) {
-          if (err) {
+      function(err) {
+        if (err) {
             console.error('Error inserting product:', err.message);
               // If SKU constraint error and we have a SKU value
               if (err.message.includes('UNIQUE constraint failed: products.sku') && skuToUse && skuToUse !== null) {
@@ -456,21 +529,26 @@ module.exports = (db, upload, uploadImage, path) => {
                             if (updateErr) {
                               console.error('Error merging after SKU conflict:', updateErr.message);
                               // Fall back to unique SKU retry
-                              const costPart = skuToUse.substring(skuToUse.length - 4);
-                              const basePrefix = skuToUse.substring(0, skuToUse.length - 4);
-                              const uniqueSku = `${basePrefix}_${Date.now()}`.slice(0, basePrefix.length) + costPart;
+                              const randomItemCode = Math.floor(Math.random() * 900) + 100;
+                              const uniqueSku = generateSKUSimple(autoCategory || category || 'ITEM', productCost, randomItemCode, computedFinalPrice);
                               console.log(`Retrying insert with unique SKU: ${uniqueSku}`);
                               return insertProduct(uniqueSku, retryCount + 1);
                             }
                             console.log(`Merged quantity (+${quantityToAdd}) into existing product ID ${existingByName.id} after SKU conflict.`);
-                            return res.json({ id: existingByName.id, merged: true, message: 'Product quantity updated (merged with existing)' });
+                            return res.json({
+                              id: existingByName.id,
+                              merged: true,
+                              message: 'Product quantity updated (merged with existing)',
+                              cost: productCost,
+                              final_price: computedFinalPrice,
+                              selling_price: productPrice,
+                            });
                           }
                         );
                       }
                       // No merge target found -> retry with a unique SKU
-                      const costPart = skuToUse.substring(skuToUse.length - 4);
-                      const basePrefix = skuToUse.substring(0, skuToUse.length - 4);
-                      const uniqueSku = `${basePrefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}`.replace(/[^A-Z0-9]/g, '').slice(0, Math.max(4, basePrefix.length)) + costPart;
+                      const randomItemCode = Math.floor(Math.random() * 900) + 100;
+                      const uniqueSku = generateSKUSimple(autoCategory || category || 'ITEM', productCost, randomItemCode, computedFinalPrice);
                       console.log(`Retrying insert with unique SKU: ${uniqueSku}`);
                       insertProduct(uniqueSku, retryCount + 1);
                     }
@@ -496,14 +574,20 @@ module.exports = (db, upload, uploadImage, path) => {
                             if (updateErr) {
                               console.error('Error merging after SKU conflict:', updateErr.message);
                               // Fall back to unique SKU retry
-                              const costPart = skuToUse.substring(skuToUse.length - 4);
-                              const basePrefix = skuToUse.substring(0, skuToUse.length - 4);
-                              const uniqueSku = `${basePrefix}_${Date.now()}`.slice(0, basePrefix.length) + costPart;
+                              const randomItemCode = Math.floor(Math.random() * 900) + 100;
+                              const uniqueSku = generateSKUSimple(autoCategory || category || 'ITEM', productCost, randomItemCode, computedFinalPrice);
                               console.log(`Retrying insert with unique SKU: ${uniqueSku}`);
                               return insertProduct(uniqueSku, retryCount + 1);
                             }
                             console.log(`Merged quantity (+${quantityToAdd}) into existing product ID ${existingByBarcode.id} after SKU conflict.`);
-                            return res.json({ id: existingByBarcode.id, merged: true, message: 'Product quantity updated (merged with existing)' });
+                            return res.json({
+                              id: existingByBarcode.id,
+                              merged: true,
+                              message: 'Product quantity updated (merged with existing)',
+                              cost: productCost,
+                              final_price: computedFinalPrice,
+                              selling_price: productPrice,
+                            });
                           }
                         );
                       }
@@ -517,12 +601,19 @@ module.exports = (db, upload, uploadImage, path) => {
                 return tryMergeThenReturn();
             } else {
               // For other errors or if SKU is NULL, return error
-              return res.status(500).json({ error: err.message });
-            }
+          return res.status(500).json({ error: err.message });
+        }
           } else {
             console.log(`Product created successfully with ID: ${this.lastID}`);
-            res.json({ id: this.lastID, message: 'Product created successfully' });
-          }
+        res.json({
+          id: this.lastID,
+          message: 'Product created successfully',
+          sku: skuToUse,
+          cost: productCost,
+          final_price: computedFinalPrice,
+          selling_price: productPrice,
+        });
+      }
         }
       );
     };
@@ -552,7 +643,10 @@ module.exports = (db, upload, uploadImage, path) => {
           return res.json({ 
             id: existing.id, 
             merged: true, 
-            message: `Product quantity updated. Added ${quantityToAdd}, new total: ${newTotal}` 
+            message: `Product quantity updated. Added ${quantityToAdd}, new total: ${newTotal}`,
+            cost: productCost,
+            final_price: computedFinalPrice,
+            selling_price: productPrice,
           });
         }
       );
@@ -608,14 +702,28 @@ module.exports = (db, upload, uploadImage, path) => {
     let productSku = sku && sku.trim() !== '' ? sku.trim() : null;
     
     // First, get the current product to check if SKU is being changed
-    db.get('SELECT sku FROM products WHERE id = ?', [productId], (err, currentProduct) => {
+    db.get('SELECT sku, category, cost, price FROM products WHERE id = ?', [productId], (err, currentProduct) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
       if (!currentProduct) {
         return res.status(404).json({ error: 'Product not found' });
       }
-      
+
+      const currentCategory = currentProduct.category || '';
+      const currentCost = currentProduct.cost !== undefined && currentProduct.cost !== null ? parseFloat(currentProduct.cost) || 0 : 0;
+      const currentPriceValue = currentProduct.price !== undefined && currentProduct.price !== null ? parseFloat(currentProduct.price) || 0 : 0;
+      const parsedCost = cost !== undefined && cost !== null ? parseFloat(cost) || 0 : currentCost;
+      const resolvedCategory = category && category.trim() !== '' ? category : currentCategory || 'ITEM';
+      const parsedPrice = price !== undefined && price !== null ? parseFloat(price) || 0 : currentPriceValue;
+      const parsedStock = stock_quantity !== undefined && stock_quantity !== null ? parseInt(stock_quantity) || 0 : stock_quantity;
+      const parsedMinStock = min_stock_level !== undefined && min_stock_level !== null ? parseInt(min_stock_level) || 0 : min_stock_level;
+      const computedFinalPrice = calculateFinalPrice(parsedCost);
+
+      if (!productSku) {
+        productSku = generateSKUSimple(resolvedCategory || 'ITEM', parsedCost, null, computedFinalPrice);
+      }
+
       // Function to update product with SKU conflict handling
       const updateProduct = (skuToUse, retryCount = 0) => {
         // Prevent infinite recursion
@@ -626,13 +734,14 @@ module.exports = (db, upload, uploadImage, path) => {
         // If SKU is not NULL and not the same as current, check if it conflicts with another product
         if (skuToUse && skuToUse !== null && skuToUse !== currentProduct.sku) {
           db.get('SELECT id FROM products WHERE sku = ? AND id != ?', [skuToUse, productId], (err, conflictingProduct) => {
-            if (err) {
-              return res.status(500).json({ error: err.message });
-            }
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
             
             // If SKU conflicts with another product, generate a unique one
             if (conflictingProduct) {
-              const uniqueSku = `${skuToUse}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+              const randomItemCode = Math.floor(Math.random() * 900) + 100;
+              const uniqueSku = generateSKUSimple(resolvedCategory || 'ITEM', parsedCost, randomItemCode, computedFinalPrice);
               console.log(`SKU conflict detected for product ${productId}, using unique SKU: ${uniqueSku}`);
               updateProduct(uniqueSku, retryCount + 1);
               return;
@@ -651,27 +760,34 @@ module.exports = (db, upload, uploadImage, path) => {
       const performUpdate = (skuToUse, retryCount) => {
         db.run(
           'UPDATE products SET name = ?, description = ?, sku = ?, category = ?, price = ?, cost = ?, stock_quantity = ?, min_stock_level = ?, supplier_id = ?, image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [name, description, skuToUse, category, price, cost, stock_quantity, min_stock_level, supplier_id, image_url, productId],
+          [name, description, skuToUse, category, parsedPrice, parsedCost, parsedStock, parsedMinStock, supplier_id, image_url, productId],
           function(updateErr) {
             if (updateErr) {
               console.error('Error updating product:', updateErr.message);
               // If it's a SKU constraint error we didn't catch, handle it
               if (updateErr.message.includes('UNIQUE constraint failed: products.sku') && skuToUse && skuToUse !== null) {
-                const uniqueSku = `${skuToUse}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+                const randomItemCode = Math.floor(Math.random() * 900) + 100;
+                const uniqueSku = generateSKUSimple(resolvedCategory || 'ITEM', parsedCost, randomItemCode, computedFinalPrice);
                 console.log(`SKU constraint error during update, retrying with: ${uniqueSku}`);
                 updateProduct(uniqueSku, retryCount + 1);
               } else {
                 return res.status(500).json({ error: updateErr.message });
               }
             } else {
-              if (this.changes === 0) {
-                return res.status(404).json({ error: 'Product not found' });
-              }
+        if (this.changes === 0) {
+          return res.status(404).json({ error: 'Product not found' });
+        }
               console.log(`Product ${productId} updated successfully`);
-              res.json({ message: 'Product updated successfully', sku: skuToUse });
-            }
-          }
-        );
+              res.json({
+                message: 'Product updated successfully',
+                sku: skuToUse,
+                cost: parsedCost,
+                final_price: computedFinalPrice,
+                selling_price: parsedPrice,
+              });
+      }
+      }
+    );
       };
       
       // Start update process
@@ -679,9 +795,19 @@ module.exports = (db, upload, uploadImage, path) => {
     });
   });
 
-  // Delete product
+  // Delete single product (MUST be after /all route)
   router.delete('/:id', (req, res) => {
-    db.run('DELETE FROM products WHERE id = ?', [req.params.id], function(err) {
+    const productId = req.params.id;
+    
+    // Prevent accidental deletion of "all" as an ID
+    if (productId === 'all') {
+      console.error('❌ WARNING: Attempted to delete "all" as ID. This should have matched /all route.');
+      return res.status(400).json({ 
+        error: 'Invalid product ID. Use /api/inventory/all to delete all products.' 
+      });
+    }
+    
+    db.run('DELETE FROM products WHERE id = ?', [productId], function(err) {
       if (err) {
         return res.status(500).json({ error: err.message });
       }

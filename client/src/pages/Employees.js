@@ -35,9 +35,9 @@ function Employees() {
     email: '',
     phone: '',
     position: '',
-    salary: '',
     hire_date: '',
     status: 'active',
+    monthlyAllowance: '0',
   });
 
   useEffect(() => {
@@ -63,9 +63,13 @@ function Employees() {
         email: employee.email || '',
         phone: employee.phone || '',
         position: employee.position || '',
-        salary: employee.salary || '',
         hire_date: employee.hire_date || '',
         status: employee.status || 'active',
+        monthlyAllowance: employee.monthly_allowance !== undefined && employee.monthly_allowance !== null
+          ? String(parseFloat(employee.monthly_allowance))
+          : employee.salary !== undefined && employee.salary !== null
+            ? String(parseFloat(employee.salary))
+            : '0',
       });
     } else {
       setEditing(null);
@@ -74,9 +78,9 @@ function Employees() {
         email: '',
         phone: '',
         position: '',
-        salary: '',
         hire_date: '',
         status: 'active',
+        monthlyAllowance: '0',
       });
     }
     setOpen(true);
@@ -89,15 +93,16 @@ function Employees() {
 
   const handleSubmit = async () => {
     try {
-      const data = {
-        ...formData,
-        salary: parseFloat(formData.salary),
+      const { monthlyAllowance, ...rest } = formData;
+      const payload = {
+        ...rest,
+        monthly_allowance: parseFloat(monthlyAllowance) || 0,
       };
 
       if (editing) {
-        await employeesAPI.update(editing, data);
+        await employeesAPI.update(editing, payload);
       } else {
-        await employeesAPI.create(data);
+        await employeesAPI.create(payload);
       }
       fetchEmployees();
       handleClose();
@@ -146,7 +151,7 @@ function Employees() {
               <TableCell>Email</TableCell>
               <TableCell>Phone</TableCell>
               <TableCell>Position</TableCell>
-              <TableCell>Salary</TableCell>
+              <TableCell>Monthly Balance</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
@@ -158,7 +163,17 @@ function Employees() {
                 <TableCell>{employee.email}</TableCell>
                 <TableCell>{employee.phone}</TableCell>
                 <TableCell>{employee.position}</TableCell>
-                <TableCell>₪{parseFloat(employee.salary || 0).toFixed(2)}</TableCell>
+                <TableCell>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    ₪{parseFloat(employee.balance_remaining ?? (employee.monthly_allowance || 0)).toFixed(2)} remaining
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    Withdrawn: ₪{parseFloat(employee.total_withdrawn || 0).toFixed(2)} / Allowance: ₪{parseFloat(employee.monthly_allowance || employee.salary || 0).toFixed(2)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Resets monthly
+                  </Typography>
+                </TableCell>
                 <TableCell>{employee.status}</TableCell>
                 <TableCell>
                   <IconButton size="small" onClick={() => handleOpen(employee)}>
@@ -204,13 +219,6 @@ function Employees() {
               onChange={(e) => setFormData({ ...formData, position: e.target.value })}
             />
             <TextField
-              label="Salary"
-              type="number"
-              fullWidth
-              value={formData.salary}
-              onChange={(e) => setFormData({ ...formData, salary: e.target.value })}
-            />
-            <TextField
               label="Hire Date"
               type="date"
               fullWidth
@@ -228,6 +236,15 @@ function Employees() {
               <MenuItem value="active">Active</MenuItem>
               <MenuItem value="inactive">Inactive</MenuItem>
             </TextField>
+            <TextField
+              label="Monthly Balance Allowance (₪)"
+              type="number"
+              fullWidth
+              value={formData.monthlyAllowance}
+              onChange={(e) => setFormData({ ...formData, monthlyAllowance: e.target.value })}
+              helperText="Set the monthly amount available for withdrawals"
+              inputProps={{ min: 0, step: 0.01 }}
+            />
           </Box>
         </DialogContent>
         <DialogActions>

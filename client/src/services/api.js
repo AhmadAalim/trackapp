@@ -115,6 +115,17 @@ export const excelBrowserAPI = {
   uploadAndParse: (formData) => {
     return api.post('/excel-browser/parse', formData);
   },
+  getHistory: () => api.get('/excel-browser/history'),
+  getHistoryEntry: (id) => api.get(`/excel-browser/history/${id}`),
+};
+
+export const stickersAPI = {
+  generate: ({ size, format }) =>
+    api.post(
+      '/generate-stickers',
+      { size, format },
+      { responseType: 'blob' }
+    ),
 };
 
 export default api;

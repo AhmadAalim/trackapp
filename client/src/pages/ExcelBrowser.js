@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Container,
   Paper,
@@ -33,6 +33,79 @@ function ExcelBrowser() {
   const [addingRows, setAddingRows] = useState(new Set());
   const [addingAll, setAddingAll] = useState(false);
   const [addAllProgress, setAddAllProgress] = useState({ done: 0, total: 0, success: 0, errors: 0 });
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState(null);
+  const [selectedHistoryId, setSelectedHistoryId] = useState(null);
+  const applyParsedResult = useCallback((payload = {}, options = {}) => {
+    const {
+      fileName: overrideFileName,
+      clearFile = false,
+      historyEntry = null,
+      historyId,
+    } = options;
+
+    const sheetsArray = Array.isArray(payload?.sheets) ? payload.sheets : [];
+    setSheets(sheetsArray);
+
+    if (sheetsArray.length > 0) {
+      const initialSheet =
+        sheetsArray.find((sheet) => Array.isArray(sheet?.data) && sheet.data.length > 0) ??
+        sheetsArray[0];
+      const sheetName = initialSheet?.name || sheetsArray[0]?.name || '';
+      setSelectedSheet(sheetName);
+      setData(Array.isArray(initialSheet?.data) ? initialSheet.data : []);
+      setColumns(Array.isArray(initialSheet?.columns) ? initialSheet.columns : []);
+    } else {
+      setSelectedSheet('');
+      setData([]);
+      setColumns([]);
+    }
+
+    if (typeof overrideFileName === 'string') {
+      setFileName(overrideFileName);
+    }
+
+    if (clearFile) {
+      setFile(null);
+    }
+
+    if (historyEntry && historyEntry.id) {
+      setSelectedHistoryId(historyEntry.id);
+    } else if (historyId) {
+      setSelectedHistoryId(historyId);
+    }
+
+    setError(null);
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const response = await excelBrowserAPI.getHistory();
+      const historyItems = Array.isArray(response?.data?.history) ? response.data.history : [];
+      setHistory(historyItems);
+      setHistoryError(null);
+    } catch (err) {
+      console.error('Error fetching Excel history:', err);
+      setHistoryError(err.response?.data?.error || err.message || 'Failed to load history');
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
+  const recentHistory = useMemo(() => history, [history]);
+  const totalRows = data.length;
+  const totalSheets = sheets.length;
+  const totalSummary = `Sheets: ${totalSheets} • Rows: ${totalRows}`;
+  const parsedSummary = !error && sheets.length > 0
+    ? `Parsed ${sheets.reduce((sum, s) => sum + (s.rowCount || 0), 0)} rows in ${sheets.length} sheet(s)`
+    : '';
 
   const handleFileSelect = async (event) => {
     const selectedFile = event.target.files[0];
@@ -55,6 +128,7 @@ function ExcelBrowser() {
     setColumns([]);
     setSheets([]);
     setSelectedSheet('');
+    setSelectedHistoryId(null);
 
     // Auto-upload when file is selected
     await handleUpload(selectedFile);
@@ -79,104 +153,28 @@ function ExcelBrowser() {
 
     try {
       const response = await excelBrowserAPI.uploadAndParse(formData);
-      
-      console.log('Response:', response);
-      console.log('Response.data:', response.data);
-      
-      if (response.data.error) {
-        setError(response.data.error);
+      const responseData = response?.data || {};
+
+      if (responseData.error) {
+        setError(responseData.error);
         return;
       }
 
-      // Check response structure more carefully
-      if (!response || !response.data) {
-        console.error('No response data:', response);
-        setError('No response received from server');
-        return;
+      applyParsedResult(responseData, {
+        fileName: fileToProcess.name,
+        historyEntry: responseData.historyEntry,
+      });
+
+      if (Array.isArray(responseData.history)) {
+        setHistory(responseData.history);
+      } else if (responseData.historyEntry) {
+        setHistory((prev) => {
+          const filtered = prev.filter((item) => item.id !== responseData.historyEntry.id);
+          return [responseData.historyEntry, ...filtered].slice(0, 20);
+        });
       }
 
-      if (!response.data.sheets) {
-        console.error('No sheets in response:', response.data);
-        setError(`Server response missing sheets. Response keys: ${Object.keys(response.data || {}).join(', ')}`);
-        return;
-      }
-
-      // Handle case where sheets might be an object instead of array
-      let sheetsArray = response.data.sheets;
-      
-      if (!Array.isArray(sheetsArray)) {
-        console.warn('Sheets is not an array, converting from object:', typeof sheetsArray, sheetsArray);
-        
-        // Try to convert object to array
-        if (sheetsArray && typeof sheetsArray === 'object' && sheetsArray !== null) {
-          const keys = Object.keys(sheetsArray);
-          console.log('Object keys:', keys);
-          
-          if (keys.length > 0) {
-            // Convert object to array - keys are sheet names
-            const convertedArray = keys.map(key => {
-              const value = sheetsArray[key];
-              console.log(`Processing key "${key}":`, value);
-              
-              // Normalize the value to a sheet object
-              if (value && typeof value === 'object') {
-                // Value is an object - check what properties it has
-                return {
-                  name: value.name || key,
-                  rowCount: value.rowCount !== undefined ? value.rowCount : (Array.isArray(value.data) ? value.data.length : (Array.isArray(value) ? value.length : 0)),
-                  columns: Array.isArray(value.columns) ? value.columns : (value.columns ? [value.columns] : []),
-                  data: Array.isArray(value.data) ? value.data : (Array.isArray(value) ? value : [])
-                };
-              } else if (Array.isArray(value)) {
-                // Value is directly an array (data)
-                return {
-                  name: key,
-                  rowCount: value.length,
-                  columns: value.length > 0 ? Object.keys(value[0] || {}) : [],
-                  data: value
-                };
-              } else {
-                // Value is something else - create minimal sheet
-                return {
-                  name: key,
-                  rowCount: 0,
-                  columns: [],
-                  data: []
-                };
-              }
-            });
-            
-            console.log('Converted array:', convertedArray);
-            
-            if (convertedArray.length > 0) {
-              sheetsArray = convertedArray;
-              console.log('Successfully converted object to array!');
-            } else {
-              setError(`Could not convert sheets object to array. Keys: ${keys.join(', ')}`);
-              return;
-            }
-          } else {
-            setError(`Invalid sheets format. Empty object received.`);
-            return;
-          }
-        } else {
-          setError(`Invalid sheets format. Expected array but got ${typeof sheetsArray}`);
-          return;
-        }
-      }
-
-      // Set sheets (use the converted array)
-      setSheets(sheetsArray);
-      
-      // Show first sheet (or first sheet with data)
-      if (sheetsArray.length > 0) {
-        const firstSheet = sheetsArray[0];
-        setSelectedSheet(firstSheet.name || 'Sheet1');
-        setData(Array.isArray(firstSheet.data) ? firstSheet.data : []);
-        setColumns(Array.isArray(firstSheet.columns) ? firstSheet.columns : []);
-      }
-
-      setError(null);
+      setHistoryError(null);
     } catch (err) {
       console.error('Error uploading file:', err);
       setError(err.response?.data?.error || err.message || 'Failed to parse Excel file');
@@ -186,6 +184,52 @@ function ExcelBrowser() {
       setLoading(false);
     }
   };
+
+  const handleSelectHistoryEntry = useCallback(
+    async (entry) => {
+      if (!entry || !entry.id) return;
+
+      setSelectedHistoryId(entry.id);
+      setLoading(true);
+      setError(null);
+      setData([]);
+      setColumns([]);
+      setSheets([]);
+      setSelectedSheet('');
+      setFile(null);
+
+      try {
+        const response = await excelBrowserAPI.getHistoryEntry(entry.id);
+        const responseData = response?.data || {};
+
+        if (responseData.error) {
+          setError(responseData.error);
+          return;
+        }
+
+        const mergedEntry = responseData.historyEntry || entry;
+
+        applyParsedResult(responseData, {
+          fileName: entry.originalName,
+          clearFile: true,
+          historyEntry: mergedEntry,
+          historyId: entry.id,
+        });
+
+        setHistory((prev) => {
+          const filtered = prev.filter((item) => item.id !== mergedEntry.id);
+          return [mergedEntry, ...filtered];
+        });
+        setHistoryError(null);
+      } catch (err) {
+        console.error('Error loading history entry:', err);
+        setError(err.response?.data?.error || err.message || 'Failed to load saved Excel file');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyParsedResult]
+  );
 
   const handleSheetChange = (sheetName) => {
     const sheet = sheets.find((s) => s && s.name === sheetName);
@@ -276,32 +320,22 @@ function ExcelBrowser() {
       // Cost Price → cost
       const costPrice = getValue([
         'Cost Price', 'cost price', 'CostPrice', 'Cost', 'cost', 'Purchase Price', 'purchase price',
-        'מחיר עלות', 'עלות' // Hebrew variations
+        'מחיר עלות', 'עלות', 'מחיר לאחר הנחה' // Hebrew variations
       ], '0');
 
       // Final Price → price
       const finalPrice = getValue([
         'Final Price', 'final price', 'FinalPrice', 'Price', 'price', 'Selling Price', 'selling price',
-        'מחיר סופי', 'מחיר', 'מחיר לאחר הנחה' // Hebrew variations
+        'מחיר סופי', 'מחיר לצרכן', 'צרכן' // Hebrew variations
       ], '0');
 
       // Generate SKU: last 4 digits are cost price padded with zeros
       const cost = safeParseFloat(costPrice, 0);
-      const costPadded = Math.floor(cost).toString().padStart(4, '0'); // Last 4 digits: 0025 for 25
-      
-      // Create SKU prefix from product name (first 4 uppercase letters/numbers)
-      const namePrefix = productName
-        .replace(/[^a-zA-Z0-9]/g, '') // Remove special characters
-        .substring(0, 4)
-        .toUpperCase()
-        .padEnd(4, 'X'); // Fill with X if name is too short
-      
-      const generatedSku = `${namePrefix}${costPadded}`;
 
       const productData = {
         name: productName.trim(), // Product Name → name
         description: productBarcode || '', // Product Barcode → description
-        sku: generatedSku, // Generated SKU with cost price as last 4 digits
+        sku: '', // Let backend generate SKU with cost/final format
         category: '',
         price: safeParseFloat(finalPrice, 0), // Final Price → price
         cost: cost, // Cost Price → cost
@@ -375,118 +409,152 @@ function ExcelBrowser() {
       return isNaN(parsed) ? defaultValue : parsed;
     };
 
-    let successCount = 0;
-    let errorCount = 0;
+    const parsedRows = [];
 
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
-      
+
+      // Product Description → name field
+      let productName = getValue(row, [
+        'Product Description', 'product description', 'ProductDescription', 'Description', 'description',
+        'תיאור פריט', 'תיאור' // Hebrew variations
+      ], '');
+
+      if (!productName || productName.trim() === '') {
+        productName = getValue(row, [
+          'Product Name', 'product name', 'ProductName', 'Name', 'name', 'Product', 'product',
+          'שם מוצר' // Hebrew variations
+        ], '');
+      }
+
+      if (!productName || productName.trim() === '') {
+        productName = `Product ${selectedSheet} Row ${i + 1}`;
+      }
+
+      // Product Barcode → description field
+      const productBarcode = getValue(row, [
+        'Product Barcode', 'product barcode', 'ProductBarcode', 'Barcode', 'barcode',
+        'ברקוד' // Hebrew
+      ], '');
+
+      // Quantity → stock_quantity
+      const quantity = getValue(row, [
+        'Quantity', 'quantity', 'Qty', 'qty', 'Stock', 'stock', 'Stock Quantity',
+        'כמות' // Hebrew
+      ], '0');
+
+      // Cost Price → cost
+      const costPrice = getValue(row, [
+        'Cost Price', 'cost price', 'CostPrice', 'Cost', 'cost', 'Purchase Price', 'purchase price',
+        'מחיר עלות', 'עלות', 'מחיר לאחר הנחה' // Hebrew variations
+      ], '0');
+
+      // Final Price → price
+      const finalPrice = getValue(row, [
+        'Final Price', 'final price', 'FinalPrice', 'Price', 'price', 'Selling Price', 'selling price',
+        'מחיר סופי', 'מחיר לצרכן', 'צרכן' // Hebrew variations
+      ], '0');
+
+      const cost = safeParseFloat(costPrice, 0);
+
+      const productData = {
+        name: productName.trim(),
+        description: productBarcode || '',
+        sku: '',
+        category: '',
+        price: safeParseFloat(finalPrice, 0),
+        cost: cost,
+        stock_quantity: safeParseInt(quantity, 0),
+        min_stock_level: 10,
+        supplier_id: null,
+        image_url: null,
+      };
+
+      parsedRows.push({ productData });
+    }
+
+    // Merge duplicates by barcode while summing quantities
+    const mergedByBarcode = new Map();
+    const uniqueItems = [];
+
+    parsedRows.forEach(({ productData }) => {
+      const key = (productData.description || '').replace(/\s+/g, '').toLowerCase();
+      if (key) {
+        if (!mergedByBarcode.has(key)) {
+          mergedByBarcode.set(key, { ...productData });
+        } else {
+          const existing = mergedByBarcode.get(key);
+          existing.stock_quantity += productData.stock_quantity;
+          if (!existing.name && productData.name) existing.name = productData.name;
+          if (!existing.description && productData.description) existing.description = productData.description;
+          if (!existing.cost && productData.cost) existing.cost = productData.cost;
+          if (!existing.price && productData.price) existing.price = productData.price;
+          mergedByBarcode.set(key, existing);
+        }
+      } else {
+        uniqueItems.push(productData);
+      }
+    });
+
+    const itemsToUpload = [...mergedByBarcode.values(), ...uniqueItems];
+
+    setAddAllProgress({ done: 0, total: itemsToUpload.length, success: 0, errors: 0 });
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < itemsToUpload.length; i++) {
+      const productData = itemsToUpload[i];
       try {
-        // Product Description → name field
-        let productName = getValue(row, [
-          'Product Description', 'product description', 'ProductDescription', 'Description', 'description',
-          'תיאור פריט', 'תיאור' // Hebrew variations
-        ], '');
-        
-        if (!productName || productName.trim() === '') {
-          productName = getValue(row, [
-            'Product Name', 'product name', 'ProductName', 'Name', 'name', 'Product', 'product',
-            'שם מוצר' // Hebrew variations
-          ], '');
-        }
-        
-        if (!productName || productName.trim() === '') {
-          productName = `Product ${selectedSheet} Row ${i + 1}`;
-        }
-
-        // Product Barcode → description field
-        const productBarcode = getValue(row, [
-          'Product Barcode', 'product barcode', 'ProductBarcode', 'Barcode', 'barcode',
-          'ברקוד' // Hebrew
-        ], '');
-
-        // Quantity → stock_quantity
-        const quantity = getValue(row, [
-          'Quantity', 'quantity', 'Qty', 'qty', 'Stock', 'stock', 'Stock Quantity',
-          'כמות' // Hebrew
-        ], '0');
-
-        // Cost Price → cost
-        const costPrice = getValue(row, [
-          'Cost Price', 'cost price', 'CostPrice', 'Cost', 'cost', 'Purchase Price', 'purchase price',
-          'מחיר עלות', 'עלות' // Hebrew variations
-        ], '0');
-
-        // Final Price → price
-        const finalPrice = getValue(row, [
-          'Final Price', 'final price', 'FinalPrice', 'Price', 'price', 'Selling Price', 'selling price',
-          'מחיר סופי', 'מחיר', 'מחיר לאחר הנחה' // Hebrew variations
-        ], '0');
-
-        // Generate SKU: last 4 digits are cost price padded with zeros
-        const cost = safeParseFloat(costPrice, 0);
-        const costPadded = Math.floor(cost).toString().padStart(4, '0');
-        
-        const namePrefix = productName
-          .replace(/[^a-zA-Z0-9]/g, '')
-          .substring(0, 4)
-          .toUpperCase()
-          .padEnd(4, 'X');
-        
-        const generatedSku = `${namePrefix}${costPadded}`;
-
-        const productData = {
-          name: productName.trim(),
-          description: productBarcode || '',
-          sku: generatedSku,
-          category: '',
-          price: safeParseFloat(finalPrice, 0),
-          cost: cost,
-          stock_quantity: safeParseInt(quantity, 0),
-          min_stock_level: 10,
-          supplier_id: null,
-          image_url: null,
-        };
-
         await inventoryAPI.create(productData);
         successCount++;
         setAddAllProgress(prev => ({ ...prev, done: prev.done + 1, success: prev.success + 1 }));
       } catch (err) {
-        console.error(`Error adding row ${i + 1} to inventory:`, err);
+        console.error(`Error adding aggregated item ${i + 1} to inventory:`, err);
         errorCount++;
         setAddAllProgress(prev => ({ ...prev, done: prev.done + 1, errors: prev.errors + 1 }));
       }
     }
 
     setAddingAll(false);
-    
+
     alert(
       `Import completed!\n\n` +
       `✅ Successfully added: ${successCount} product(s)\n` +
       `${errorCount > 0 ? `❌ Errors: ${errorCount} product(s)\n` : ''}` +
-      `Total processed: ${data.length} row(s)`
+      `Total processed after merging duplicates: ${itemsToUpload.length} item(s)`
     );
   };
 
   return (
-    <Container maxWidth="xl">
-      <Box mb={4}>
-        <Typography variant="h4" gutterBottom>
-          Excel File Browser
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Upload an Excel file to view and browse its contents
-        </Typography>
-      </Box>
-
-      {/* File Upload */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+    <Container maxWidth="xl" sx={{ pt: 0, px: { xs: 1.5, sm: 2 } }}>
+      <Box
+        display="flex"
+        justifyContent="space-between"
+        alignItems="flex-start"
+        flexWrap="wrap"
+        gap={0.75}
+        mb={0.5}
+      >
+        <Box sx={{ minWidth: 0 }}>
+          <Typography
+            variant="body2"
+            sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, mb: 0.1 }}
+          >
+            Excel File Browser
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {totalSummary}
+          </Typography>
+        </Box>
+        <Box display="flex" alignItems="center" gap={0.75} flexWrap="wrap">
           <Button
             variant="contained"
             component="label"
-            startIcon={<UploadFileIcon />}
+            startIcon={<UploadFileIcon fontSize="small" />}
             disabled={loading}
+            size="small"
+            sx={{ px: 1.5, py: 0.5 }}
           >
             {loading ? 'Uploading...' : 'Select Excel File'}
             <input
@@ -500,7 +568,7 @@ function ExcelBrowser() {
           {fileName && !loading && (
             <Chip
               label={fileName}
-              icon={<TableChartIcon />}
+              icon={<TableChartIcon fontSize="small" />}
               onDelete={() => {
                 setFile(null);
                 setFileName('');
@@ -514,76 +582,217 @@ function ExcelBrowser() {
               }}
               color="primary"
               variant="outlined"
+              size="small"
+              title={fileName}
+              sx={{
+                maxWidth: 240,
+                '& .MuiChip-label': {
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                },
+              }}
             />
           )}
 
           {loading && (
-            <Box display="flex" alignItems="center" gap={1}>
-              <CircularProgress size={20} />
-              <Typography variant="body2">Parsing file...</Typography>
+            <Box display="flex" alignItems="center" gap={0.5}>
+              <CircularProgress size={18} />
+              <Typography variant="caption">Parsing file...</Typography>
+            </Box>
+          )}
+
+          {parsedSummary && (
+              <Chip
+                label={parsedSummary}
+                color="success"
+                variant="outlined"
+                size="small"
+                sx={{
+                  ml: { xs: 0, sm: 0.25 },
+                  '& .MuiChip-label': {
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  },
+                }}
+              />
+          )}
+        </Box>
+      </Box>
+
+      <Paper
+        variant="outlined"
+        sx={{
+          mb: 1.5,
+          borderRadius: 2,
+          p: 1,
+        }}
+      >
+        <Box display="flex" flexDirection="column" gap={1}>
+          <Box display="flex" alignItems="center" justifyContent="space-between" gap={1}>
+            <Typography
+              variant="body2"
+              sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}
+            >
+              Recent Excel Files
+            </Typography>
+            {historyLoading && (
+              <Box display="flex" alignItems="center" gap={0.5}>
+                <CircularProgress size={16} />
+                <Typography variant="caption" color="text.secondary">
+                  Loading…
+                </Typography>
+              </Box>
+            )}
+          </Box>
+
+          {historyError && !historyLoading && (
+            <Alert
+              severity="warning"
+              sx={{ mb: 0, py: 0.5, '.MuiAlert-message': { py: 0 } }}
+            >
+              {historyError}
+            </Alert>
+          )}
+
+          {!historyLoading && !historyError && recentHistory.length === 0 && (
+            <Typography variant="caption" color="text.secondary">
+              Upload an Excel file to start building your recent files list.
+            </Typography>
+          )}
+
+          {recentHistory.length > 0 && (
+            <Box
+              sx={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 0.75,
+              }}
+            >
+              {recentHistory.map((entry) => {
+                const isSelected = selectedHistoryId === entry.id;
+                const uploadedLabel = entry.uploadedAt
+                  ? new Date(entry.uploadedAt).toLocaleString()
+                  : '';
+                return (
+                  <Chip
+                    key={entry.id}
+                    size="small"
+                    color={isSelected ? 'primary' : 'default'}
+                    variant={isSelected ? 'filled' : 'outlined'}
+                    label={entry.originalName || 'Untitled file'}
+                    onClick={() => handleSelectHistoryEntry(entry)}
+                    title={`${entry.originalName || 'Untitled file'}
+${uploadedLabel ? `Uploaded: ${uploadedLabel}` : ''}
+Sheets: ${entry.sheetCount ?? 0} • Rows: ${entry.totalRows ?? 0}`}
+                    sx={{
+                      maxWidth: 240,
+                      cursor: 'pointer',
+                      '& .MuiChip-label': {
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      },
+                    }}
+                  />
+                );
+              })}
             </Box>
           )}
         </Box>
-
-        {error && (
-          <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        )}
-
-        {!error && sheets.length > 0 && (
-          <Alert severity="success" sx={{ mt: 2 }}>
-            File parsed successfully! {sheets.reduce((sum, s) => sum + (s.rowCount || 0), 0)} total rows across {sheets.length} sheet(s).
-          </Alert>
-        )}
       </Paper>
 
-      {/* Sheets Selection */}
-      {sheets.length > 0 && (
-        <Paper sx={{ p: 2, mb: 3 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            {sheets.length > 1 ? 'Select Sheet:' : 'Sheet:'}
-          </Typography>
-          <Box display="flex" gap={1} flexWrap="wrap">
-            {sheets.map((sheet) => (
-              <Chip
-                key={sheet.name}
-                label={`${sheet.name} (${sheet.rowCount || 0} rows)`}
-                onClick={() => handleSheetChange(sheet.name)}
-                color={selectedSheet === sheet.name ? 'primary' : 'default'}
-                variant={selectedSheet === sheet.name ? 'filled' : 'outlined'}
-                sx={{ cursor: sheets.length > 1 ? 'pointer' : 'default' }}
-              />
-            ))}
-          </Box>
-        </Paper>
+      {error && (
+        <Chip
+          color="error"
+          variant="outlined"
+          size="small"
+          label={error}
+          onDelete={() => setError(null)}
+          title={error}
+          sx={{
+            mb: 0.5,
+            maxWidth: '100%',
+            '& .MuiChip-label': {
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            },
+          }}
+        />
       )}
 
       {/* Data Display */}
       {sheets.length > 0 && selectedSheet && (
         <Paper>
-          <Box p={2} display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                {selectedSheet || 'Sheet Data'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                {data.length} row(s), {columns.length} column(s)
-              </Typography>
+          <Box p={0.75} display="flex" flexDirection="column" gap={1.25}>
+            <Box
+              display="flex"
+              justifyContent="space-between"
+              alignItems="center"
+              flexWrap="wrap"
+              gap={1.25}
+            >
+              <Box>
+                <Typography
+                  variant="body2"
+                  sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3, mb: 0 }}
+                >
+                  {selectedSheet || 'Sheet Data'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {data.length} row(s), {columns.length} column(s)
+                </Typography>
+              </Box>
+              {data.length > 0 && (
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<AddIcon />}
+                  onClick={handleAddAllToInventory}
+                  disabled={addingAll}
+                  size="small"
+                  sx={{ px: 1.5, py: 0.5 }}
+                >
+                  {addingAll 
+                    ? `Adding... (${addAllProgress.done}/${addAllProgress.total})` 
+                  : `Add All ${data.length} Items`}
+                </Button>
+              )}
             </Box>
-            {data.length > 0 && (
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<AddIcon />}
-                onClick={handleAddAllToInventory}
-                disabled={addingAll}
-                size="large"
+
+            {sheets.length > 0 && (
+              <Box
+                display="flex"
+                alignItems="center"
+                gap={0.75}
+                flexWrap="wrap"
+                sx={{
+                  maxWidth: '100%',
+                  overflowX: 'auto',
+                  pb: 0.5,
+                  '&::-webkit-scrollbar': { height: 6 },
+                  '&::-webkit-scrollbar-thumb': { borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.2)' },
+                }}
               >
-                {addingAll 
-                  ? `Adding... (${addAllProgress.done}/${addAllProgress.total})` 
-                  : `Add All ${data.length} Items to Inventory`}
-              </Button>
+                {sheets.length > 1 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                    Sheets:
+                  </Typography>
+                )}
+                {sheets.map((sheet) => (
+                  <Chip
+                    key={sheet.name}
+                    size="small"
+                    label={`${sheet.name}${sheet.rowCount ? ` (${sheet.rowCount})` : ''}`}
+                    onClick={() => handleSheetChange(sheet.name)}
+                    color={selectedSheet === sheet.name ? 'primary' : 'default'}
+                    variant={selectedSheet === sheet.name ? 'filled' : 'outlined'}
+                    sx={{ cursor: sheets.length > 1 ? 'pointer' : 'default' }}
+                  />
+                ))}
+              </Box>
             )}
           </Box>
           {addingAll && (

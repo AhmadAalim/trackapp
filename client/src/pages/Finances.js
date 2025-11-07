@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Container,
   Paper,
@@ -17,17 +17,45 @@ import {
   IconButton,
   Typography,
   Box,
-  Alert,
   CircularProgress,
   Chip,
   Grid,
   MenuItem,
+  Tooltip,
 } from '@mui/material';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import RemoveCircleIcon from '@mui/icons-material/RemoveCircle';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { financesAPI } from '../services/api';
+import NoteAltIcon from '@mui/icons-material/NoteAlt';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import { employeesAPI, financesAPI } from '../services/api';
+
+const EMPLOYEE_WITHDRAWAL_CATEGORY = 'Employee Withdrawal';
+
+const incomeCategoryOptions = [
+  { value: 'Salary', label: 'Salary' },
+  { value: 'Sales', label: 'Sales' },
+  { value: 'Investment', label: 'Investment' },
+  { value: 'Other Income', label: 'Other Income' },
+];
+
+const expenseCategoryOptions = [
+  { value: 'Rent', label: 'Rent' },
+  { value: 'Cost of Goods (COGS)', label: 'Cost of Goods (COGS)' },
+  {
+    value: 'Utilities',
+    label: 'Utilities (Electricity, Trash Removal, Water, Internet, Cellular Data)',
+  },
+  { value: 'Accountant', label: 'Accountant' },
+  {
+    value: 'Maintenance Items',
+    label: 'Maintenance Items (Cleaning products, Coffee capsules, Water bottles)',
+  },
+  { value: EMPLOYEE_WITHDRAWAL_CATEGORY, label: 'Employee Withdrawal' },
+  { value: 'Other', label: 'Other' },
+];
 
 function Finances() {
   const [records, setRecords] = useState([]);
@@ -36,16 +64,25 @@ function Finances() {
   const [recordType, setRecordType] = useState(null); // 'income' or 'expense'
   const [editing, setEditing] = useState(null);
   const [stats, setStats] = useState({ totalIncome: 0, totalExpenses: 0, netAmount: 0 });
+  const [employees, setEmployees] = useState([]);
+  const [showDescription, setShowDescription] = useState(false);
+  const [showTotals, setShowTotals] = useState({
+    income: false,
+    expenses: false,
+    net: false,
+  });
   const [formData, setFormData] = useState({
     category: '',
     amount: '',
     description: '',
     expense_date: new Date().toISOString().split('T')[0],
+    employee_id: '',
   });
 
   useEffect(() => {
     fetchRecords();
     fetchStats();
+    fetchEmployees();
   }, []);
 
   const fetchRecords = async () => {
@@ -68,16 +105,33 @@ function Finances() {
     }
   };
 
+  const fetchEmployees = async () => {
+    try {
+      const response = await employeesAPI.getAll();
+      setEmployees(response.data || []);
+    } catch (err) {
+      console.error('Error fetching employees:', err);
+    }
+  };
+
   const handleOpen = (type, record = null) => {
     setRecordType(type);
     if (record) {
       setEditing(record.id);
       setFormData({
         category: record.category || '',
-        amount: record.amount || '',
+        amount:
+          record.amount !== undefined && record.amount !== null
+            ? String(record.amount)
+            : '',
         description: record.description || '',
         expense_date: record.expense_date || new Date().toISOString().split('T')[0],
+        employee_id:
+          record.employee_id !== undefined && record.employee_id !== null
+            ? String(record.employee_id)
+            : '',
       });
+      setShowDescription(Boolean(record.description));
     } else {
       setEditing(null);
       setFormData({
@@ -85,7 +139,9 @@ function Finances() {
         amount: '',
         description: '',
         expense_date: new Date().toISOString().split('T')[0],
+        employee_id: '',
       });
+      setShowDescription(false);
     }
     setOpen(true);
   };
@@ -94,14 +150,40 @@ function Finances() {
     setOpen(false);
     setEditing(null);
     setRecordType(null);
+    setShowDescription(false);
+  };
+
+  const handleCategoryChange = (value) => {
+    setFormData((prev) => ({
+      ...prev,
+      category: value,
+      employee_id:
+        recordType === 'expense' && value === EMPLOYEE_WITHDRAWAL_CATEGORY
+          ? prev.employee_id
+          : '',
+    }));
   };
 
   const handleSubmit = async () => {
     try {
+      const isEmployeeWithdrawal =
+        recordType === 'expense' && formData.category === EMPLOYEE_WITHDRAWAL_CATEGORY;
+
+      const employeeIdForSubmission = (() => {
+        if (!isEmployeeWithdrawal || !formData.employee_id) {
+          return null;
+        }
+        const parsed = parseInt(formData.employee_id, 10);
+        return Number.isNaN(parsed) ? null : parsed;
+      })();
+
       const data = {
-        ...formData,
-        type: recordType,
+        category: formData.category,
         amount: parseFloat(formData.amount),
+        description: formData.description,
+        expense_date: formData.expense_date,
+        type: recordType,
+        employee_id: employeeIdForSubmission,
       };
 
       if (editing) {
@@ -131,18 +213,60 @@ function Finances() {
     }
   };
 
-  const commonCategories = [
-    'Salary',
-    'Sales',
-    'Investment',
-    'Other Income',
-    'Rent',
-    'Utilities',
-    'Supplies',
-    'Marketing',
-    'Transportation',
-    'Other Expense',
-  ];
+  const categoryOptions = useMemo(
+    () => (recordType === 'expense' ? expenseCategoryOptions : incomeCategoryOptions),
+    [recordType]
+  );
+
+  const effectiveCategoryOptions = useMemo(() => {
+    if (!formData.category) {
+      return categoryOptions;
+    }
+
+    const exists = categoryOptions.some((option) => option.value === formData.category);
+    return exists
+      ? categoryOptions
+      : [...categoryOptions, { value: formData.category, label: formData.category }];
+  }, [categoryOptions, formData.category]);
+
+  const employeeOptions = useMemo(
+    () =>
+      employees.map((employee) => ({
+        value: String(employee.id),
+        label: employee.name || `Employee #${employee.id}`,
+      })),
+    [employees]
+  );
+
+  const employeeMap = useMemo(() => {
+    const map = {};
+    employees.forEach((employee) => {
+      map[employee.id] = employee.name;
+    });
+    return map;
+  }, [employees]);
+
+  const isEmployeeWithdrawalCategory =
+    recordType === 'expense' && formData.category === EMPLOYEE_WITHDRAWAL_CATEGORY;
+
+  const formatCurrency = (value) => {
+    const numberValue = Number(value ?? 0);
+    if (Number.isNaN(numberValue)) {
+      return '₪0.00';
+    }
+
+    return `₪${numberValue.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
+  const maskCurrency = (value) => {
+    const formatted = formatCurrency(value);
+    return '*'.repeat(formatted.length);
+  };
+
+  const renderMaskedValue = (value, visible) => (visible ? formatCurrency(value) : maskCurrency(value));
 
   if (loading) {
     return (
@@ -187,9 +311,24 @@ function Finances() {
             <Typography variant="h6" gutterBottom>
               Total Income
             </Typography>
-            <Typography variant="h4">
-              ₪{parseFloat(stats.totalIncome || 0).toFixed(2)}
-            </Typography>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Typography variant="h4" sx={{ flexGrow: 1 }}>
+                {renderMaskedValue(stats.totalIncome, showTotals.income)}
+              </Typography>
+              <IconButton
+                aria-label={showTotals.income ? 'Hide total income' : 'Show total income'}
+                size="small"
+                color="inherit"
+                onClick={() =>
+                  setShowTotals((prev) => ({
+                    ...prev,
+                    income: !prev.income,
+                  }))
+                }
+              >
+                {showTotals.income ? <VisibilityOffIcon /> : <VisibilityIcon />}
+              </IconButton>
+            </Box>
           </Paper>
         </Grid>
         <Grid item xs={12} md={4}>
@@ -197,9 +336,24 @@ function Finances() {
             <Typography variant="h6" gutterBottom>
               Total Expenses
             </Typography>
-            <Typography variant="h4">
-              ₪{parseFloat(stats.totalExpenses || 0).toFixed(2)}
-            </Typography>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Typography variant="h4" sx={{ flexGrow: 1 }}>
+                {renderMaskedValue(stats.totalExpenses, showTotals.expenses)}
+              </Typography>
+              <IconButton
+                aria-label={showTotals.expenses ? 'Hide total expenses' : 'Show total expenses'}
+                size="small"
+                color="inherit"
+                onClick={() =>
+                  setShowTotals((prev) => ({
+                    ...prev,
+                    expenses: !prev.expenses,
+                  }))
+                }
+              >
+                {showTotals.expenses ? <VisibilityOffIcon /> : <VisibilityIcon />}
+              </IconButton>
+            </Box>
           </Paper>
         </Grid>
         <Grid item xs={12} md={4}>
@@ -213,9 +367,24 @@ function Finances() {
             <Typography variant="h6" gutterBottom>
               Net Amount
             </Typography>
-            <Typography variant="h4">
-              ₪{parseFloat(stats.netAmount || 0).toFixed(2)}
-            </Typography>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Typography variant="h4" sx={{ flexGrow: 1 }}>
+                {renderMaskedValue(stats.netAmount, showTotals.net)}
+              </Typography>
+              <IconButton
+                aria-label={showTotals.net ? 'Hide net amount' : 'Show net amount'}
+                size="small"
+                color="inherit"
+                onClick={() =>
+                  setShowTotals((prev) => ({
+                    ...prev,
+                    net: !prev.net,
+                  }))
+                }
+              >
+                {showTotals.net ? <VisibilityOffIcon /> : <VisibilityIcon />}
+              </IconButton>
+            </Box>
           </Paper>
         </Grid>
       </Grid>
@@ -226,6 +395,7 @@ function Finances() {
             <TableRow>
               <TableCell>Type</TableCell>
               <TableCell>Category</TableCell>
+              <TableCell>Employee</TableCell>
               <TableCell>Amount</TableCell>
               <TableCell>Description</TableCell>
               <TableCell>Date</TableCell>
@@ -235,54 +405,61 @@ function Finances() {
           <TableBody>
             {records.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} align="center">
+                <TableCell colSpan={7} align="center">
                   <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
                     No records found. Add income or expense records to get started.
                   </Typography>
                 </TableCell>
               </TableRow>
             ) : (
-              records.map((record) => (
-                <TableRow key={record.id}>
-                  <TableCell>
-                    <Chip
-                      label={record.type === 'income' ? 'Income' : 'Expense'}
-                      color={record.type === 'income' ? 'success' : 'error'}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>{record.category}</TableCell>
-                  <TableCell>
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        color: record.type === 'income' ? 'success.main' : 'error.main',
-                        fontWeight: 'bold',
-                      }}
-                    >
-                      {record.type === 'income' ? '+' : '-'}₪
-                      {parseFloat(record.amount).toFixed(2)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>{record.description || '-'}</TableCell>
-                  <TableCell>
-                    {record.expense_date
-                      ? new Date(record.expense_date).toLocaleDateString()
-                      : '-'}
-                  </TableCell>
-                  <TableCell>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleOpen(record.type, record)}
-                    >
-                      <EditIcon />
-                    </IconButton>
-                    <IconButton size="small" onClick={() => handleDelete(record.id)}>
-                      <DeleteIcon />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))
+              records.map((record) => {
+                const employeeName =
+                  record.employee_name ||
+                  (record.employee_id ? employeeMap[record.employee_id] : null);
+
+                return (
+                  <TableRow key={record.id}>
+                    <TableCell>
+                      <Chip
+                        label={record.type === 'income' ? 'Income' : 'Expense'}
+                        color={record.type === 'income' ? 'success' : 'error'}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>{record.category}</TableCell>
+                    <TableCell>{employeeName || '-'}</TableCell>
+                    <TableCell>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color: record.type === 'income' ? 'success.main' : 'error.main',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        {record.type === 'income' ? '+' : '-'}₪
+                        {parseFloat(record.amount).toFixed(2)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>{record.description || '-'}</TableCell>
+                    <TableCell>
+                      {record.expense_date
+                        ? new Date(record.expense_date).toLocaleDateString()
+                        : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleOpen(record.type, record)}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton size="small" onClick={() => handleDelete(record.id)}>
+                        <DeleteIcon />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -298,40 +475,56 @@ function Finances() {
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
             <TextField
               select
-              label="Category"
+              label={recordType === 'expense' ? 'Expense Category' : 'Income Category'}
               fullWidth
               value={formData.category}
-              onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+              onChange={(e) => handleCategoryChange(e.target.value)}
               SelectProps={{
                 native: false,
               }}
-              helperText="Select a category or type your own below"
+              helperText={
+                recordType === 'expense'
+                  ? 'What is the expense for?'
+                  : 'Select a category or type your own below'
+              }
               required
+              disabled={!recordType}
             >
-              {commonCategories
-                .filter((cat) =>
-                  recordType === 'income'
-                    ? ['Salary', 'Sales', 'Investment', 'Other Income'].includes(cat)
-                    : !['Salary', 'Sales', 'Investment', 'Other Income'].includes(cat)
-                )
-                .map((category) => (
-                  <MenuItem key={category} value={category}>
-                    {category}
-                  </MenuItem>
-                ))}
+              {effectiveCategoryOptions.map((category) => (
+                <MenuItem key={category.value} value={category.value}>
+                  {category.label}
+                </MenuItem>
+              ))}
             </TextField>
-            <TextField
-              label="Or Enter Custom Category"
-              fullWidth
-              value={!commonCategories.includes(formData.category) ? formData.category : ''}
-              onChange={(e) => {
-                if (e.target.value) {
-                  setFormData({ ...formData, category: e.target.value });
+            {isEmployeeWithdrawalCategory && (
+              <TextField
+                select
+                label="Employee"
+                fullWidth
+                value={formData.employee_id}
+                onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
+                SelectProps={{ native: false }}
+                required
+                disabled={employeeOptions.length === 0}
+                helperText={
+                  employeeOptions.length === 0
+                    ? 'Add employees in the Employees section before recording a withdrawal.'
+                    : 'Select the employee who received the withdrawal.'
                 }
-              }}
-              placeholder="Type a custom category here"
-              helperText="If the category you need is not in the list above, type it here"
-            />
+              >
+                {employeeOptions.length === 0 ? (
+                  <MenuItem value="" disabled>
+                    No employees available
+                  </MenuItem>
+                ) : (
+                  employeeOptions.map((employee) => (
+                    <MenuItem key={employee.value} value={employee.value}>
+                      {employee.label}
+                    </MenuItem>
+                  ))
+                )}
+              </TextField>
+            )}
             <TextField
               label="Amount"
               type="number"
@@ -341,15 +534,36 @@ function Finances() {
               inputProps={{ step: '0.01', min: '0' }}
               required
             />
-            <TextField
-              label="Description"
-              fullWidth
-              multiline
-              rows={3}
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Optional description or notes"
-            />
+            <Box display="flex" justifyContent="flex-end">
+              <Tooltip title={showDescription ? 'Hide notes' : 'Add notes'}>
+                <IconButton
+                  aria-label={showDescription ? 'Hide notes' : 'Add notes'}
+                  onClick={() => {
+                    setShowDescription((prev) => {
+                      if (prev) {
+                        setFormData((current) => ({ ...current, description: '' }));
+                      }
+                      return !prev;
+                    });
+                  }}
+                  color={showDescription ? 'primary' : 'default'}
+                  sx={{ alignSelf: 'flex-end' }}
+                >
+                  <NoteAltIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+            {showDescription && (
+              <TextField
+                label="Notes"
+                fullWidth
+                multiline
+                rows={3}
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Optional description or notes"
+              />
+            )}
             <TextField
               label="Date"
               type="date"
@@ -365,7 +579,12 @@ function Finances() {
           <Button
             onClick={handleSubmit}
             variant="contained"
-            disabled={!formData.category || !formData.amount}
+            disabled={
+              !formData.category ||
+              !formData.amount ||
+              (isEmployeeWithdrawalCategory &&
+                (employeeOptions.length === 0 || !formData.employee_id))
+            }
             color={recordType === 'income' ? 'success' : 'error'}
           >
             {editing ? 'Update' : 'Add'}

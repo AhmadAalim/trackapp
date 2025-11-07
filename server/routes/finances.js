@@ -2,28 +2,38 @@ module.exports = (db) => {
   const express = require('express');
   const router = express.Router();
 
+  const baseSelectQuery = `
+    SELECT expenses.*, employees.name AS employee_name
+    FROM expenses
+    LEFT JOIN employees ON expenses.employee_id = employees.id
+  `;
+
+  const getExpenseById = (id, callback) => {
+    db.get(`${baseSelectQuery} WHERE expenses.id = ?`, [id], callback);
+  };
+
   // Get all income/expense records
   router.get('/', (req, res) => {
     const { type, startDate, endDate } = req.query;
-    let query = 'SELECT * FROM expenses WHERE 1=1';
+    let query = `${baseSelectQuery} WHERE 1=1`;
     const params = [];
 
     if (type) {
-      query += ' AND type = ?';
+      query += ' AND expenses.type = ?';
       params.push(type);
     }
 
     if (startDate) {
-      query += ' AND DATE(expense_date) >= ?';
+      query += ' AND DATE(expenses.expense_date) >= ?';
       params.push(startDate);
     }
 
     if (endDate) {
-      query += ' AND DATE(expense_date) <= ?';
+      query += ' AND DATE(expenses.expense_date) <= ?';
       params.push(endDate);
     }
 
-    query += ' ORDER BY expense_date DESC, created_at DESC';
+    query += ' ORDER BY expenses.expense_date DESC, expenses.created_at DESC';
 
     db.all(query, params, (err, rows) => {
       if (err) {
@@ -36,7 +46,7 @@ module.exports = (db) => {
   // Get single income/expense record
   router.get('/:id', (req, res) => {
     const { id } = req.params;
-    db.get('SELECT * FROM expenses WHERE id = ?', [id], (err, row) => {
+    getExpenseById(id, (err, row) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
@@ -49,7 +59,7 @@ module.exports = (db) => {
 
   // Create income/expense record
   router.post('/', (req, res) => {
-    const { type, category, amount, description, expense_date } = req.body;
+    const { type, category, amount, description, expense_date, employee_id } = req.body;
 
     if (!type || !amount) {
       return res.status(400).json({ error: 'Type and amount are required' });
@@ -60,17 +70,18 @@ module.exports = (db) => {
     }
 
     const date = expense_date || new Date().toISOString().split('T')[0];
+    const employeeIdValue = employee_id ? parseInt(employee_id, 10) : null;
 
     db.run(
-      'INSERT INTO expenses (type, category, amount, description, expense_date) VALUES (?, ?, ?, ?, ?)',
-      [type, category || '', parseFloat(amount), description || '', date],
+      'INSERT INTO expenses (type, category, amount, description, expense_date, employee_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [type, category || '', parseFloat(amount), description || '', date, employeeIdValue],
       function (err) {
         if (err) {
           return res.status(500).json({ error: err.message });
         }
-        db.get('SELECT * FROM expenses WHERE id = ?', [this.lastID], (err, row) => {
-          if (err) {
-            return res.status(500).json({ error: err.message });
+        getExpenseById(this.lastID, (fetchErr, row) => {
+          if (fetchErr) {
+            return res.status(500).json({ error: fetchErr.message });
           }
           res.status(201).json(row);
         });
@@ -81,7 +92,7 @@ module.exports = (db) => {
   // Update income/expense record
   router.put('/:id', (req, res) => {
     const { id } = req.params;
-    const { type, category, amount, description, expense_date } = req.body;
+    const { type, category, amount, description, expense_date, employee_id } = req.body;
 
     if (type && type !== 'income' && type !== 'expense') {
       return res.status(400).json({ error: 'Type must be either "income" or "expense"' });
@@ -111,6 +122,11 @@ module.exports = (db) => {
       params.push(expense_date);
     }
 
+    if (employee_id !== undefined) {
+      updates.push('employee_id = ?');
+      params.push(employee_id ? parseInt(employee_id, 10) : null);
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
@@ -127,9 +143,9 @@ module.exports = (db) => {
         if (this.changes === 0) {
           return res.status(404).json({ error: 'Record not found' });
         }
-        db.get('SELECT * FROM expenses WHERE id = ?', [id], (err, row) => {
-          if (err) {
-            return res.status(500).json({ error: err.message });
+        getExpenseById(id, (fetchErr, row) => {
+          if (fetchErr) {
+            return res.status(500).json({ error: fetchErr.message });
           }
           res.json(row);
         });

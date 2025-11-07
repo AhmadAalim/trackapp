@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Container,
   Paper,
@@ -20,6 +20,13 @@ import {
   CircularProgress,
   InputAdornment,
   Avatar,
+  Tabs,
+  Tab,
+  Tooltip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -28,19 +35,205 @@ import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import SearchIcon from '@mui/icons-material/Search';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
+import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import * as XLSX from 'xlsx';
 import Alert from '@mui/material/Alert';
 import { inventoryAPI } from '../services/api';
+import GenerateStickersButton from '../components/GenerateStickersButton';
+
+const DELETE_ALL_PASSWORD = process.env.REACT_APP_DELETE_ALL_PASSWORD || '1111';
+
+const calculateFinalPrice = (cost) => {
+  const numericCost = Number(cost) || 0;
+  const finalPrice = numericCost * 1.18 * 1.3;
+  return Number(finalPrice.toFixed(2));
+};
 
 function Inventory() {
   const [products, setProducts] = useState([]);
-  const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState('all');
   const [imagePreview, setImagePreview] = useState(null);
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState(null);
+  const [failedImportRows, setFailedImportRows] = useState([]);
+  const [retryingRowIndex, setRetryingRowIndex] = useState(null);
+  const [retryAllLoading, setRetryAllLoading] = useState(false);
+  const [retryFeedback, setRetryFeedback] = useState(null);
+  const [restockList, setRestockList] = useState([]);
+  const [sortOption, setSortOption] = useState('nameAsc');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [stockFilter, setStockFilter] = useState('all');
+  const totalProducts = products.length;
+  const lowStockProducts = useMemo(
+    () =>
+      products.filter(
+        (product) =>
+          Number(product.stock_quantity ?? 0) <= Number(product.min_stock_level ?? 10)
+      ),
+    [products]
+  );
+
+  const filterProductsBySearch = useCallback(
+    (items) => {
+      if (!searchTerm) {
+        return items;
+      }
+
+      const lowerSearch = searchTerm.toLowerCase();
+      return items.filter((product) =>
+        product.name?.toLowerCase().includes(lowerSearch) ||
+        (product.sku && product.sku.toLowerCase().includes(lowerSearch)) ||
+        (product.category && product.category.toLowerCase().includes(lowerSearch)) ||
+        (product.description && product.description.toLowerCase().includes(lowerSearch))
+      );
+    },
+    [searchTerm]
+  );
+
+  const applyFilters = useCallback(
+    (items) => {
+      if (!Array.isArray(items)) {
+        return [];
+      }
+
+      return items.filter((product) => {
+        if (categoryFilter !== 'all') {
+          if ((product.category || '').trim() !== categoryFilter) {
+            return false;
+          }
+        }
+
+        if (stockFilter !== 'all') {
+          const quantity = Number(product.stock_quantity ?? 0);
+          const minLevel = Number(product.min_stock_level ?? 10);
+
+          if (stockFilter === 'low' && quantity > minLevel) {
+            return false;
+          }
+
+          if (stockFilter === 'inStock' && quantity <= minLevel) {
+            return false;
+          }
+
+          if (stockFilter === 'outOfStock' && quantity > 0) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+    },
+    [categoryFilter, stockFilter]
+  );
+
+  const applySorting = useCallback(
+    (items) => {
+      if (!Array.isArray(items)) {
+        return [];
+      }
+
+      const sorted = [...items];
+
+      switch (sortOption) {
+        case 'nameDesc':
+          sorted.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+          break;
+        case 'stockAsc':
+          sorted.sort(
+            (a, b) => Number(a.stock_quantity ?? 0) - Number(b.stock_quantity ?? 0)
+          );
+          break;
+        case 'stockDesc':
+          sorted.sort(
+            (a, b) => Number(b.stock_quantity ?? 0) - Number(a.stock_quantity ?? 0)
+          );
+          break;
+        case 'priceAsc':
+          sorted.sort(
+            (a, b) =>
+              Number(a.price ?? a.selling_price ?? 0) -
+              Number(b.price ?? b.selling_price ?? 0)
+          );
+          break;
+        case 'priceDesc':
+          sorted.sort(
+            (a, b) =>
+              Number(b.price ?? b.selling_price ?? 0) -
+              Number(a.price ?? a.selling_price ?? 0)
+          );
+          break;
+        case 'nameAsc':
+        default:
+          sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          break;
+      }
+
+      return sorted;
+    },
+    [sortOption]
+  );
+
+  const filteredAllProducts = useMemo(
+    () => applySorting(applyFilters(filterProductsBySearch(products))),
+    [products, filterProductsBySearch, applyFilters, applySorting]
+  );
+
+  const restockProducts = useMemo(
+    () =>
+      restockList
+        .map((productId) => products.find((product) => product.id === productId))
+        .filter(Boolean),
+    [restockList, products]
+  );
+
+  const categoryOptions = useMemo(() => {
+    const set = new Set();
+    products.forEach((product) => {
+      const category = (product.category || '').trim();
+      if (category) {
+        set.add(category);
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const filteredRestockProducts = useMemo(
+    () => applySorting(applyFilters(filterProductsBySearch(restockProducts))),
+    [restockProducts, filterProductsBySearch, applyFilters, applySorting]
+  );
+
+  const filteredLowStockProducts = useMemo(
+    () => applySorting(applyFilters(filterProductsBySearch(lowStockProducts))),
+    [lowStockProducts, filterProductsBySearch, applyFilters, applySorting]
+  );
+
+  const totalRestockProducts = restockProducts.length;
+
+  const displayedProducts = useMemo(() => {
+    if (activeTab === 'lowStock') {
+      return filteredLowStockProducts;
+    }
+    if (activeTab === 'restock') {
+      return filteredRestockProducts;
+    }
+    return filteredAllProducts;
+  }, [activeTab, filteredAllProducts, filteredLowStockProducts, filteredRestockProducts]);
+  const displayedProductsCount = displayedProducts.length;
+  const totalItemsInTab = useMemo(() => {
+    if (activeTab === 'lowStock') {
+      return lowStockProducts.length;
+    }
+    if (activeTab === 'restock') {
+      return totalRestockProducts;
+    }
+    return totalProducts;
+  }, [activeTab, lowStockProducts.length, totalRestockProducts, totalProducts]);
   const [formData, setFormData] = useState({
     name: '', // Product Name
     description: '', // Product Barcode
@@ -58,19 +251,65 @@ function Inventory() {
   }, []);
 
   useEffect(() => {
-    if (searchTerm) {
-      const filtered = products.filter(
-        (product) =>
-          product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (product.sku && product.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
-          (product.category && product.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
-          (product.description && product.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    setRestockList((prev) => {
+      const validIds = prev.filter((id) =>
+        products.some((product) => product.id === id)
       );
-      setFilteredProducts(filtered);
-    } else {
-      setFilteredProducts(products);
+      return validIds.length === prev.length ? prev : validIds;
+    });
+  }, [products]);
+
+  const restockSet = useMemo(() => new Set(restockList), [restockList]);
+
+  const handleToggleRestock = useCallback(
+    (productId) => {
+      if (!productId) return;
+      setRestockList((prev) =>
+        prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]
+      );
+    },
+    []
+  );
+
+  const handleExportRestockList = useCallback(() => {
+    if (restockProducts.length === 0) {
+      alert('Your restock list is empty. Add products before exporting.');
+      return;
     }
-  }, [searchTerm, products]);
+
+    const exportData = restockProducts.map((product, index) => {
+      const costValue = Number(product.cost ?? product.cost_price ?? 0);
+      const finalPriceValue =
+        product.final_price !== undefined && product.final_price !== null
+          ? Number(product.final_price)
+          : calculateFinalPrice(costValue);
+      const sellingPriceValue = Number(product.price ?? product.selling_price ?? 0);
+
+      return {
+        '#': index + 1,
+        Name: product.name || '',
+        Barcode: product.description || '',
+        SKU: product.sku || '',
+        Category: product.category || '',
+        'Cost Price': costValue,
+        'Final Price': finalPriceValue,
+        'Selling Price': sellingPriceValue,
+        Stock: Number(product.stock_quantity ?? 0),
+        'Minimum Stock Level': Number(product.min_stock_level ?? 10),
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Restock List');
+
+    const fileName = `Restock_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  }, [restockProducts]);
+
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
 
   const fetchProducts = async () => {
     try {
@@ -87,7 +326,6 @@ function Inventory() {
       });
       
       setProducts(productsWithId);
-      setFilteredProducts(productsWithId);
     } catch (err) {
       console.error('Error fetching products:', err);
     } finally {
@@ -164,13 +402,16 @@ function Inventory() {
     originalButton.disabled = true;
 
     // For mobile camera, use file directly
-    const formData = new FormData();
-    formData.append('image', file);
+    const uploadData = new FormData();
+    uploadData.append('image', file);
 
     try {
-      const response = await inventoryAPI.uploadImage(formData);
+      const response = await inventoryAPI.uploadImage(uploadData);
       if (response.data && response.data.imageUrl) {
-        setFormData({ ...formData, image_url: response.data.imageUrl });
+        setFormData((prev) => ({
+          ...prev,
+          image_url: response.data.imageUrl,
+        }));
         setImagePreview(`http://localhost:5001${response.data.imageUrl}`);
       } else {
         throw new Error('Invalid response from server');
@@ -200,25 +441,15 @@ function Inventory() {
         return;
       }
 
-      // Generate SKU: last 4 digits are cost price padded with zeros
       const cost = parseFloat(formData.cost) || 0;
-      const costPadded = Math.floor(cost).toString().padStart(4, '0'); // Last 4 digits: 0025 for 25
-      
-      // Create SKU prefix from product name (first 4 uppercase letters/numbers)
-      const namePrefix = (formData.name || 'PROD')
-        .replace(/[^a-zA-Z0-9]/g, '') // Remove special characters
-        .substring(0, 4)
-        .toUpperCase()
-        .padEnd(4, 'X'); // Fill with X if name is too short
-      
-      const generatedSku = `${namePrefix}${costPadded}`;
+      const sellingPrice = parseFloat(formData.price) || 0;
 
       const data = {
         name: formData.name,
         description: formData.description, // Product Barcode
-        sku: generatedSku, // Generated SKU with cost price as last 4 digits
+        sku: editing ? (formData.sku || null) : null,
         category: '',
-        price: parseFloat(formData.price) || 0, // Final Price
+        price: sellingPrice, // Selling price (sticker)
         cost: cost, // Cost Price
         stock_quantity: parseInt(formData.stock_quantity) || 0, // Quantity
         min_stock_level: parseInt(formData.min_stock_level) || 10,
@@ -268,24 +499,33 @@ function Inventory() {
     
     if (!firstConfirm) return;
 
-    // Second confirmation with typing requirement
-    const confirmText = 'DELETE ALL';
-    const userInput = window.prompt(
-      `⚠️ FINAL WARNING: You are about to permanently delete ALL products!\n\n` +
-      `Type "${confirmText}" (in all caps) to confirm:`
+    // Require password confirmation
+    const passwordInput = window.prompt(
+      `⚠️ FINAL WARNING: Deleting all products is irreversible.\n\n` +
+      `Enter the delete password to continue:`
     );
 
-    if (userInput !== confirmText) {
-      alert('Deletion cancelled. The confirmation text did not match.');
+    if (passwordInput === null) {
+      alert('Deletion cancelled.');
+      return;
+    }
+
+    if (passwordInput !== DELETE_ALL_PASSWORD) {
+      alert('Deletion cancelled. Incorrect password.');
       return;
     }
 
     try {
-      console.log('Calling deleteAll API...');
+      console.log('🗑️ Calling deleteAll API...');
       console.log('Current products count:', products.length);
       
+      if (products.length === 0) {
+        alert('No products to delete.');
+        return;
+      }
+      
       const response = await inventoryAPI.deleteAll();
-      console.log('Delete all response:', response);
+      console.log('✅ Delete all response:', response);
       console.log('Response status:', response?.status);
       console.log('Response data:', response?.data);
       
@@ -295,13 +535,16 @@ function Inventory() {
         
         alert(`✅ ${message}`);
         
-        // Refresh the product list immediately
+        // Clear the products state immediately
+        setProducts([]);
+        
+        // Refresh the product list to confirm
         await fetchProducts();
       } else {
         throw new Error('Invalid response from server - no data received');
       }
     } catch (err) {
-      console.error('Error deleting all products:', err);
+      console.error('❌ Error deleting all products:', err);
       console.error('Error response:', err.response);
       console.error('Error status:', err.response?.status);
       console.error('Error data:', err.response?.data);
@@ -310,13 +553,15 @@ function Inventory() {
       let errorMsg = 'Failed to delete all products';
       if (err.response?.status === 404) {
         errorMsg = 'Delete endpoint not found (404). The route may not be registered correctly.';
+      } else if (err.response?.status === 400) {
+        errorMsg = err.response.data?.error || 'Invalid request. Please check server logs.';
       } else if (err.response?.data?.error) {
         errorMsg = err.response.data.error;
       } else if (err.message) {
         errorMsg = err.message;
       }
       
-      alert(`Error: ${errorMsg}\n\nPlease check the browser console for more details.`);
+      alert(`❌ Error: ${errorMsg}\n\nPlease check the browser console for more details.`);
     }
   };
 
@@ -336,6 +581,8 @@ function Inventory() {
 
     setImporting(true);
     setImportMessage(null);
+    setRetryFeedback(null);
+    setFailedImportRows([]);
 
     const formData = new FormData();
     formData.append('excel', file);
@@ -347,12 +594,21 @@ function Inventory() {
       
       const successCount = response.data.success || 0;
       const errors = response.data.errors || [];
+      const failedRows = response.data.failedRows || [];
       
       setImportMessage({
         type: 'success',
         text: response.data.message || `Successfully imported ${successCount} product${successCount !== 1 ? 's' : ''}`,
         errors: errors
       });
+
+      setFailedImportRows(failedRows);
+      if (failedRows.length > 0) {
+        setRetryFeedback({
+          type: 'warning',
+          text: `${failedRows.length} row${failedRows.length !== 1 ? 's' : ''} failed to import. Review details below to retry.`,
+        });
+      }
 
       // Force refresh product list - wait a bit for database to update
       setTimeout(async () => {
@@ -366,6 +622,14 @@ function Inventory() {
     } catch (err) {
       console.error('Error importing Excel:', err);
       console.error('Error details:', err.response?.data);
+      const failedRows = err.response?.data?.failedRows || [];
+      if (failedRows.length > 0) {
+        setFailedImportRows(failedRows);
+        setRetryFeedback({
+          type: 'error',
+          text: `${failedRows.length} row${failedRows.length !== 1 ? 's' : ''} failed to import. Review details below to retry.`,
+        });
+      }
       setImportMessage({
         type: 'error',
         text: err.response?.data?.error || err.message || 'Failed to import products from Excel'
@@ -374,7 +638,80 @@ function Inventory() {
       setImporting(false);
       // Clear message after 10 seconds (longer for errors)
       setTimeout(() => setImportMessage(null), 10000);
+      setTimeout(() => setRetryFeedback(null), 15000);
     }
+  };
+
+  const normalizeProductPayload = (product) => ({
+    ...product,
+    price: Number(product.price) || 0,
+    cost: Number(product.cost) || 0,
+    stock_quantity: Number(product.stock_quantity) || 0,
+    min_stock_level: Number(product.min_stock_level) || 10,
+  });
+
+  const handleRetryFailedRow = async (row, index) => {
+    setRetryingRowIndex(index);
+    setRetryFeedback(null);
+    try {
+      const payload = normalizeProductPayload(row.product || {});
+      await inventoryAPI.create(payload);
+      setFailedImportRows((prev) => prev.filter((_, i) => i !== index));
+      setRetryFeedback({ type: 'success', text: `Row ${row.rowNumber} imported successfully.` });
+      await fetchProducts();
+    } catch (err) {
+      console.error('Retry failed row error:', err);
+      setRetryFeedback({
+        type: 'error',
+        text: err.response?.data?.error || err.message || `Failed to import row ${row.rowNumber}.`,
+      });
+    } finally {
+      setRetryingRowIndex(null);
+      setTimeout(() => setRetryFeedback(null), 10000);
+    }
+  };
+
+  const handleRetryAllFailedRows = async () => {
+    if (failedImportRows.length === 0) return;
+    setRetryAllLoading(true);
+    setRetryFeedback(null);
+
+    const remaining = [];
+    let successCount = 0;
+    const errors = [];
+
+    // eslint-disable-next-line no-restricted-syntax
+    for (const row of failedImportRows) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await inventoryAPI.create(normalizeProductPayload(row.product || {}));
+        successCount += 1;
+      } catch (err) {
+        console.error('Retry all row error:', err);
+        errors.push(`Row ${row.rowNumber}: ${err.response?.data?.error || err.message}`);
+        remaining.push(row);
+      }
+    }
+
+    setFailedImportRows(remaining);
+    if (successCount > 0) {
+      await fetchProducts();
+    }
+
+    if (remaining.length === 0) {
+      setRetryFeedback({
+        type: 'success',
+        text: `Successfully re-imported ${successCount} row${successCount !== 1 ? 's' : ''}.`,
+      });
+    } else {
+      setRetryFeedback({
+        type: 'warning',
+        text: `${successCount} row${successCount !== 1 ? 's' : ''} re-imported successfully, ${remaining.length} still failing. Last errors: ${errors.slice(0, 3).join(' | ')}`,
+      });
+    }
+
+    setRetryAllLoading(false);
+    setTimeout(() => setRetryFeedback(null), 12000);
   };
 
   if (loading) {
@@ -390,7 +727,22 @@ function Inventory() {
   return (
     <Container maxWidth="lg">
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
-        <Typography variant="h4">Inventory</Typography>
+        <Box>
+          <Typography variant="h4">Inventory</Typography>
+          <Typography variant="body2" color="text.secondary">
+          {(() => {
+            if (activeTab === 'lowStock') {
+              return `Low stock products: ${lowStockProducts.length}`;
+            }
+            if (activeTab === 'restock') {
+              return `Restock list: ${totalRestockProducts} item${totalRestockProducts === 1 ? '' : 's'}`;
+            }
+            return `Total products: ${totalProducts}`;
+          })()}
+          {searchTerm && displayedProductsCount !== totalItemsInTab &&
+            ` • Showing ${displayedProductsCount} match${displayedProductsCount === 1 ? '' : 'es'}`}
+          </Typography>
+        </Box>
         <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
           {/* Search Bar */}
           <TextField
@@ -409,23 +761,51 @@ function Inventory() {
             sx={{ minWidth: 250 }}
           />
 
-          {/* Import Excel Button */}
-          <Button
-            variant="outlined"
-            component="label"
-            startIcon={<UploadFileIcon />}
-            disabled={importing}
-            sx={{ position: 'relative' }}
-          >
-            {importing ? 'Importing...' : 'Import Excel'}
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              hidden
-              onChange={handleExcelImport}
-              disabled={importing}
-            />
-          </Button>
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel>Category</InputLabel>
+            <Select
+              value={categoryFilter}
+              label="Category"
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            >
+              <MenuItem value="all">All Categories</MenuItem>
+              {categoryOptions.map((category) => (
+                <MenuItem key={category} value={category}>
+                  {category}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel>Stock Status</InputLabel>
+            <Select
+              value={stockFilter}
+              label="Stock Status"
+              onChange={(e) => setStockFilter(e.target.value)}
+            >
+              <MenuItem value="all">All Stock Levels</MenuItem>
+              <MenuItem value="low">Low / At Minimum</MenuItem>
+              <MenuItem value="inStock">Above Minimum</MenuItem>
+              <MenuItem value="outOfStock">Out of Stock</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel>Sort By</InputLabel>
+            <Select
+              value={sortOption}
+              label="Sort By"
+              onChange={(e) => setSortOption(e.target.value)}
+            >
+              <MenuItem value="nameAsc">Name (A → Z)</MenuItem>
+              <MenuItem value="nameDesc">Name (Z → A)</MenuItem>
+              <MenuItem value="stockAsc">Stock (Low → High)</MenuItem>
+              <MenuItem value="stockDesc">Stock (High → Low)</MenuItem>
+              <MenuItem value="priceAsc">Price (Low → High)</MenuItem>
+              <MenuItem value="priceDesc">Price (High → Low)</MenuItem>
+            </Select>
+          </FormControl>
 
           {/* Delete All Button */}
           {products.length > 0 && (
@@ -439,16 +819,76 @@ function Inventory() {
             </Button>
           )}
 
+          {activeTab === 'restock' && (
+            <Button
+              variant="outlined"
+              color="primary"
+              startIcon={<FileDownloadIcon />}
+              onClick={handleExportRestockList}
+              disabled={restockProducts.length === 0}
+            >
+              Export Restock List
+            </Button>
+          )}
+
+          <GenerateStickersButton />
+
           {/* Add Product Button */}
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => handleOpen()}
-          >
-            Add Product
-          </Button>
-        </Box>
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => handleOpen()}
+        >
+          Add Product
+        </Button>
       </Box>
+
+      <Paper elevation={0} sx={{ mb: 3, borderRadius: 2, border: (theme) => `1px solid ${theme.palette.divider}` }}>
+        <Tabs
+          value={activeTab}
+          onChange={handleTabChange}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ px: 2 }}
+        >
+          <Tab
+            label={`All Products (${totalProducts})`}
+            value="all"
+          />
+          <Tab
+            label={`Low Stock (${lowStockProducts.length})`}
+            value="lowStock"
+            sx={lowStockProducts.length > 0 ? { color: (theme) => theme.palette.error.main } : undefined}
+          />
+          <Tab
+            label={`Restock List (${totalRestockProducts})`}
+            value="restock"
+          />
+        </Tabs>
+      </Paper>
+      </Box>
+
+      {activeTab === 'lowStock' && (
+        <Alert
+          severity={lowStockProducts.length === 0 ? 'success' : 'warning'}
+          sx={{ mb: 3 }}
+        >
+          {lowStockProducts.length === 0
+            ? 'Great news! All products are above their minimum stock levels.'
+            : 'These items are at or below their minimum stock levels. Consider reordering soon.'}
+        </Alert>
+      )}
+
+      {activeTab === 'restock' && (
+        <Alert
+          severity={totalRestockProducts === 0 ? 'info' : 'warning'}
+          sx={{ mb: 3 }}
+        >
+          {totalRestockProducts === 0
+            ? 'Use the plus icon next to a product to add it to your restock list.'
+            : 'This is your restock list. Export or order these items to replenish inventory.'}
+        </Alert>
+      )}
 
       {/* Import Message */}
       {importMessage && (
@@ -476,6 +916,76 @@ function Inventory() {
         </Alert>
       )}
 
+      {retryFeedback && (
+        <Alert
+          severity={retryFeedback.type}
+          onClose={() => setRetryFeedback(null)}
+          sx={{ mb: 2 }}
+        >
+          {retryFeedback.text}
+        </Alert>
+      )}
+
+      {failedImportRows.length > 0 && (
+        <Paper sx={{ mb: 3, p: 2 }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
+            <Typography variant="h6">Failed Import Rows</Typography>
+            <Button
+              variant="contained"
+              color="primary"
+              size="small"
+              onClick={handleRetryAllFailedRows}
+              disabled={retryAllLoading}
+              startIcon={retryAllLoading ? <CircularProgress color="inherit" size={16} /> : null}
+            >
+              {retryAllLoading ? 'Retrying…' : 'Retry All Failed'}
+            </Button>
+          </Box>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Row</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Barcode</TableCell>
+                  <TableCell>SKU</TableCell>
+                  <TableCell>Quantity</TableCell>
+                  <TableCell>Error</TableCell>
+                  <TableCell align="right">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {failedImportRows.map((row, idx) => (
+                  <TableRow key={`${row.rowNumber}-${row.product?.sku || idx}`} hover>
+                    <TableCell>{row.rowNumber}</TableCell>
+                    <TableCell>{row.product?.name || '-'}</TableCell>
+                    <TableCell>{row.product?.description || '-'}</TableCell>
+                    <TableCell>{row.product?.sku || '-'}</TableCell>
+                    <TableCell>{row.product?.stock_quantity ?? '-'}</TableCell>
+                    <TableCell>
+                      <Typography variant="caption" color="text.secondary">
+                        {row.error}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => handleRetryFailedRow(row, idx)}
+                        disabled={retryingRowIndex === idx || retryAllLoading}
+                        startIcon={retryingRowIndex === idx ? <CircularProgress size={14} /> : null}
+                      >
+                        {retryingRowIndex === idx ? 'Retrying…' : 'Retry'}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -485,65 +995,95 @@ function Inventory() {
               <TableCell>Barcode</TableCell>
               <TableCell>SKU</TableCell>
               <TableCell>Category</TableCell>
-              <TableCell>Price</TableCell>
+              <TableCell>Cost Price</TableCell>
+              <TableCell>Final Price</TableCell>
+              <TableCell>Selling Price</TableCell>
               <TableCell>Stock</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {filteredProducts.length === 0 ? (
+            {displayedProductsCount === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={10} align="center">
                   <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
-                    {searchTerm ? 'No products found matching your search.' : 'No products found. Add a product to get started.'}
+                    {searchTerm
+                      ? 'No products found matching your search.'
+                      : activeTab === 'lowStock'
+                        ? 'No low stock items found.'
+                        : activeTab === 'restock'
+                          ? 'No products in your restock list yet.'
+                          : 'No products found. Add a product to get started.'}
                   </Typography>
                 </TableCell>
               </TableRow>
             ) : (
-              filteredProducts.map((product) => (
-                <TableRow key={product.id}>
-                  <TableCell>
-                    {product.image_url ? (
-                      <Avatar
-                        src={`http://localhost:5001${product.image_url}`}
-                        alt={product.name}
-                        sx={{ width: 56, height: 56 }}
-                        variant="rounded"
-                      />
-                    ) : (
-                      <Avatar sx={{ width: 56, height: 56 }} variant="rounded">
-                        {product.name.charAt(0)}
-                      </Avatar>
-                    )}
-                  </TableCell>
-                  <TableCell>{product.name}</TableCell>
-                  <TableCell>
-                    <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                      {product.description || '-'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>{product.sku || '-'}</TableCell>
-                  <TableCell>{product.category || '-'}</TableCell>
-                  <TableCell>₪{parseFloat(product.price).toFixed(2)}</TableCell>
-                  <TableCell>
-                    <Box
-                      sx={{
-                        color: product.stock_quantity <= product.min_stock_level ? 'error.main' : 'inherit',
-                      }}
-                    >
-                      {product.stock_quantity}
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <IconButton size="small" onClick={() => handleOpen(product)}>
-                      <EditIcon />
-                    </IconButton>
-                    <IconButton size="small" onClick={() => handleDelete(product.id)}>
-                      <DeleteIcon />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))
+              displayedProducts.map((product) => {
+                const costValue = Number(product.cost ?? product.cost_price ?? 0);
+                const finalPriceValue = product.final_price !== undefined && product.final_price !== null
+                  ? Number(product.final_price)
+                  : calculateFinalPrice(costValue);
+                const sellingPriceValue = Number(product.price ?? product.selling_price ?? 0);
+                const isInRestock = restockSet.has(product.id);
+
+                return (
+              <TableRow key={product.id}>
+                    <TableCell>
+                      {product.image_url ? (
+                        <Avatar
+                          src={`http://localhost:5001${product.image_url}`}
+                          alt={product.name}
+                          sx={{ width: 56, height: 56 }}
+                          variant="rounded"
+                        />
+                      ) : (
+                        <Avatar sx={{ width: 56, height: 56 }} variant="rounded">
+                          {product.name?.charAt(0) || '-'}
+                        </Avatar>
+                      )}
+                    </TableCell>
+                <TableCell>{product.name}</TableCell>
+                    <TableCell>
+                      <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                        {product.description || '-'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>{product.sku || '-'}</TableCell>
+                    <TableCell>{product.category || '-'}</TableCell>
+                    <TableCell>₪{costValue.toFixed(2)}</TableCell>
+                    <TableCell>₪{finalPriceValue.toFixed(2)}</TableCell>
+                    <TableCell>₪{sellingPriceValue.toFixed(2)}</TableCell>
+                <TableCell>
+                  <Box
+                    sx={{
+                      color: product.stock_quantity <= product.min_stock_level ? 'error.main' : 'inherit',
+                    }}
+                  >
+                    {product.stock_quantity}
+                  </Box>
+                </TableCell>
+                <TableCell>
+                  <Tooltip title={isInRestock ? 'Remove from restock list' : 'Add to restock list'}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleToggleRestock(product.id)}
+                        color={isInRestock ? 'primary' : 'default'}
+                      >
+                        {isInRestock ? <RemoveCircleOutlineIcon /> : <PlaylistAddIcon />}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <IconButton size="small" onClick={() => handleOpen(product)}>
+                    <EditIcon />
+                  </IconButton>
+                  <IconButton size="small" onClick={() => handleDelete(product.id)}>
+                    <DeleteIcon />
+                  </IconButton>
+                </TableCell>
+              </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -627,13 +1167,13 @@ function Inventory() {
                 helperText="Selling price"
               />
             </Box>
-            <TextField
+              <TextField
               label="Minimum Stock Level"
-              type="number"
-              fullWidth
-              value={formData.min_stock_level}
-              onChange={(e) => setFormData({ ...formData, min_stock_level: e.target.value })}
-            />
+                type="number"
+                fullWidth
+                value={formData.min_stock_level}
+                onChange={(e) => setFormData({ ...formData, min_stock_level: e.target.value })}
+              />
           </Box>
         </DialogContent>
         <DialogActions>

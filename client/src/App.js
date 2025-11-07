@@ -11,6 +11,7 @@ import Suppliers from './pages/Suppliers';
 import Finances from './pages/Finances';
 import ExcelBrowser from './pages/ExcelBrowser';
 import LowStock from './pages/LowStock';
+import StickerGenerator from './pages/StickerGenerator';
 
 const theme = createTheme({
   palette: {
@@ -38,6 +39,7 @@ function App() {
             <Route path="/finances" element={<Finances />} />
             <Route path="/excel-browser" element={<ExcelBrowser />} />
             <Route path="/low-stock" element={<LowStock />} />
+            <Route path="/stickers" element={<StickerGenerator />} />
           </Routes>
         </Layout>
       </Router>

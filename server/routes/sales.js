@@ -52,22 +52,87 @@ module.exports = (db) => {
 
   // Create sale
   router.post('/', (req, res) => {
-    const { items, payment_method, employee_id, notes } = req.body;
+    const {
+      items,
+      payment_method,
+      payment_type,
+      employee_id,
+      notes,
+      discount_given = 0,
+      discount_percent = 0,
+    } = req.body;
     
     if (!items || items.length === 0) {
       return res.status(400).json({ error: 'Sale must have at least one item' });
     }
 
-    // Calculate total
-    const total_amount = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+    // Use payment_type if provided, otherwise fallback to payment_method
+    const paymentMethod = payment_type || payment_method || 'cash';
 
-    db.serialize(() => {
-      db.run('BEGIN TRANSACTION');
+    // Calculate subtotal
+    const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+    
+    // Validate discount against rules for each product
+    const validateDiscounts = (callback) => {
+      const discountPercent = parseFloat(discount_given) > 0
+        ? (parseFloat(discount_given) / (subtotal || 1)) * 100
+        : parseFloat(discount_percent) || 0;
+      
+      if (discountPercent === 0) {
+        return callback(); // No discount, proceed
+      }
 
-      // Insert sale
+      let validated = 0;
+      let requiresManagerApproval = false;
+      const errors = [];
+
+      // Check discount for each item
+      items.forEach((item, index) => {
+        db.get(
+          'SELECT max_discount_percent FROM discount_rules WHERE product_id = ?',
+          [item.product_id],
+          (err, rule) => {
+            if (err) {
+              errors.push(`Error checking discount for item ${index + 1}: ${err.message}`);
+            } else {
+              const maxDiscount = rule ? rule.max_discount_percent : 0;
+
+              if (discountPercent > maxDiscount) {
+                requiresManagerApproval = true;
+                errors.push(`Item ${index + 1}: Discount (${discountPercent.toFixed(2)}%) exceeds maximum allowed (${maxDiscount}%)`);
+              }
+            }
+
+            validated++;
+            if (validated === items.length) {
+              if (requiresManagerApproval && errors.length > 0) {
+                return res.status(403).json({
+                  error: 'Discount exceeds allowed limits',
+                  requires_manager_approval: true,
+                  errors: errors,
+                  message: 'Manager approval required for this discount amount.',
+                });
+              }
+              callback();
+            }
+          }
+        );
+      });
+    };
+
+    // Apply discount
+    const discountAmount = parseFloat(discount_given) || (subtotal * (parseFloat(discount_percent) || 0) / 100);
+    const total_amount = Math.max(0, subtotal - discountAmount);
+
+    // Validate discounts first, then proceed
+    validateDiscounts(() => {
+      db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+
+      // Insert sale with discount and JSON items
       db.run(
-        'INSERT INTO sales (total_amount, payment_method, employee_id, notes) VALUES (?, ?, ?, ?)',
-        [total_amount, payment_method, employee_id, notes],
+        'INSERT INTO sales (total_amount, payment_method, employee_id, notes, sale_date) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        [total_amount, paymentMethod, employee_id, notes],
         function(err) {
           if (err) {
             db.run('ROLLBACK');
@@ -114,6 +179,7 @@ module.exports = (db) => {
           });
         }
       );
+      });
     });
   });
 
@@ -161,7 +227,7 @@ module.exports = (db) => {
 
             // 3) Update sale header
             db.run(
-              'UPDATE sales SET total_amount = ?, payment_method = ?, employee_id = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+              'UPDATE sales SET total_amount = ?, payment_method = ?, employee_id = ?, notes = ?, sale_date = CURRENT_TIMESTAMP WHERE id = ?',
               [newTotal, payment_method, employee_id, notes, saleId],
               (e4) => {
                 if (e4) {

@@ -19,12 +19,18 @@ import {
   CircularProgress,
   MenuItem,
   IconButton,
+  ToggleButton,
+  ToggleButtonGroup,
+  Autocomplete,
+  Tooltip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EditNoteIcon from '@mui/icons-material/EditNote';
 import { salesAPI, inventoryAPI, employeesAPI } from '../services/api';
+import { createFilterOptions } from '@mui/material/Autocomplete';
 
 function Sales() {
   const [sales, setSales] = useState([]);
@@ -39,6 +45,13 @@ function Sales() {
     employee_id: '',
     notes: '',
     items: [{ product_id: '', quantity: 1, unit_price: 0 }],
+  });
+  const [showNotes, setShowNotes] = useState(false);
+
+  const productFilterOptions = createFilterOptions({
+    matchFrom: 'any',
+    stringify: (option) =>
+      `${option?.name || ''} ${option?.description || ''} ${option?.sku || ''} ${option?.barcode || ''} ${option?.id || ''}`,
   });
 
   useEffect(() => {
@@ -84,6 +97,7 @@ function Sales() {
       items: [{ product_id: '', quantity: 1, unit_price: 0 }],
     });
     setEditingSaleId(null);
+    setShowNotes(false);
     setOpen(true);
   };
 
@@ -107,6 +121,7 @@ function Sales() {
           unit_price: it.unit_price,
         })),
       });
+      setShowNotes(!!sale.notes);
       setOpen(true);
     } catch (err) {
       console.error('Error loading sale for edit:', err);
@@ -126,20 +141,46 @@ function Sales() {
     }
   };
 
-  const handleProductChange = (index, productId) => {
-    const product = products.find((p) => p.id === parseInt(productId));
+  const handleProductSelect = (index, product) => {
     const newItems = [...formData.items];
-    newItems[index] = {
-      ...newItems[index],
-      product_id: productId,
-      unit_price: product ? product.price : 0,
-    };
+
+    if (product) {
+      const productPrice = Number(product.price) || 0;
+      const currentQuantity = Number(newItems[index]?.quantity) || 1;
+      newItems[index] = {
+        ...newItems[index],
+        product_id: String(product.id),
+        unit_price: parseFloat(productPrice.toFixed(2)),
+        quantity: Math.max(1, currentQuantity),
+      };
+    } else {
+      newItems[index] = {
+        ...newItems[index],
+        product_id: '',
+        unit_price: 0,
+      };
+    }
+
     setFormData({ ...formData, items: newItems });
   };
 
   const handleItemChange = (index, field, value) => {
     const newItems = [...formData.items];
-    newItems[index] = { ...newItems[index], [field]: value };
+    if (field === 'quantity') {
+      const parsed = parseInt(value, 10);
+      newItems[index] = {
+        ...newItems[index],
+        quantity: Number.isNaN(parsed) ? 1 : Math.max(1, parsed),
+      };
+    } else if (field === 'unit_price') {
+      const parsed = parseFloat(value);
+      newItems[index] = {
+        ...newItems[index],
+        unit_price: Number.isNaN(parsed) ? 0 : Math.max(0, parseFloat(parsed.toFixed(2))),
+      };
+    } else {
+      newItems[index] = { ...newItems[index], [field]: value };
+    }
     setFormData({ ...formData, items: newItems });
   };
 
@@ -164,17 +205,28 @@ function Sales() {
 
   const handleSubmit = async () => {
     try {
+      const itemsToSubmit = formData.items
+        .filter((item) => item.product_id)
+        .map((item) => ({
+          product_id: parseInt(item.product_id, 10),
+          quantity: Math.max(1, parseInt(item.quantity, 10) || 0),
+          unit_price: parseFloat(item.unit_price) || 0,
+        }))
+        .filter((item) => item.product_id && item.quantity > 0);
+
+      if (itemsToSubmit.length === 0) {
+        alert('Add at least one product before completing the sale.');
+        return;
+      }
+
       const data = {
-        ...formData,
-        items: formData.items
-          .filter((item) => item.product_id)
-          .map((item) => ({
-            product_id: parseInt(item.product_id),
-            quantity: parseInt(item.quantity),
-            unit_price: parseFloat(item.unit_price),
-          })),
-        employee_id: formData.employee_id ? parseInt(formData.employee_id) : null,
+        payment_method: formData.payment_method,
+        payment_type: formData.payment_method,
+        employee_id: formData.employee_id ? parseInt(formData.employee_id, 10) : null,
+        notes: formData.notes,
+        items: itemsToSubmit,
       };
+
       if (editingSaleId) {
         await salesAPI.update(editingSaleId, data);
       } else {
@@ -257,26 +309,32 @@ function Sales() {
       <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
         <DialogTitle>{editingSaleId ? 'Edit Sale' : 'New Sale'}</DialogTitle>
         <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1.5 }}>
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                Payment Method
+              </Typography>
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={formData.payment_method}
+                onChange={(_, value) => value && setFormData({ ...formData, payment_method: value })}
+              >
+                <ToggleButton value="cash">Cash</ToggleButton>
+                <ToggleButton value="card">Card</ToggleButton>
+                <ToggleButton value="other">Other</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+
             <TextField
               select
-              label="Payment Method"
-              value={formData.payment_method}
-              onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })}
-              fullWidth
-            >
-              <MenuItem value="cash">Cash</MenuItem>
-              <MenuItem value="card">Card</MenuItem>
-              <MenuItem value="other">Other</MenuItem>
-            </TextField>
-            <TextField
-              select
-              label="Employee"
+              label="Employee (optional)"
+              size="small"
               value={formData.employee_id}
               onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
               fullWidth
             >
-              <MenuItem value="">None</MenuItem>
+              <MenuItem value="">No Employee</MenuItem>
               {employees.map((emp) => (
                 <MenuItem key={emp.id} value={emp.id}>
                   {emp.name}
@@ -284,57 +342,117 @@ function Sales() {
               ))}
             </TextField>
 
-            <Typography variant="h6">Items</Typography>
-            {formData.items.map((item, index) => (
-              <Box key={index} sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                <TextField
-                  select
-                  label="Product"
-                  value={item.product_id}
-                  onChange={(e) => handleProductChange(index, e.target.value)}
-                  sx={{ flex: 2 }}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="subtitle2">Items</Typography>
+              <Button onClick={addItem} startIcon={<AddIcon />} size="small" variant="outlined">
+                Add Item
+              </Button>
+            </Box>
+
+            {formData.items.map((item, index) => {
+              const selectedProduct = products.find((p) => String(p.id) === String(item.product_id));
+
+              return (
+                <Box
+                  key={index}
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', sm: '2fr repeat(2, minmax(90px, 1fr)) auto' },
+                    gap: 1,
+                    alignItems: 'center',
+                  }}
                 >
-                  <MenuItem value="">Select Product</MenuItem>
-                  {products.map((prod) => (
-                    <MenuItem key={prod.id} value={prod.id}>
-                      {prod.name} (₪{parseFloat(prod.price).toFixed(2)})
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  type="number"
-                  label="Quantity"
-                  value={item.quantity}
-                  onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
-                  sx={{ flex: 1 }}
-                />
-                <TextField
-                  type="number"
-                  label="Price"
-                  value={item.unit_price}
-                  onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
-                  sx={{ flex: 1 }}
-                />
-                {formData.items.length > 1 && (
-                  <Button onClick={() => removeItem(index)} color="error">
-                    Remove
-                  </Button>
-                )}
-              </Box>
-            ))}
-            <Button onClick={addItem} startIcon={<AddIcon />}>
-              Add Item
-            </Button>
+                  <Autocomplete
+                    options={products}
+                    value={selectedProduct || null}
+                    onChange={(_, value) => handleProductSelect(index, value)}
+                    filterOptions={productFilterOptions}
+                    getOptionLabel={(option) =>
+                      option
+                        ? `${option.description || option.sku || '—'} — ${option.name}`
+                        : ''
+                    }
+                    isOptionEqualToValue={(option, value) => option.id === value.id}
+                    onInputChange={(_, value, reason) => {
+                      if (reason === 'input' && value) {
+                        const normalized = value.trim().toLowerCase();
+                        const barcodeMatch = products.find((p) =>
+                          [p.description, p.sku, p.barcode]
+                            .filter(Boolean)
+                            .some((field) => String(field).toLowerCase() === normalized)
+                        );
+                        if (barcodeMatch) {
+                          handleProductSelect(index, barcodeMatch);
+                        }
+                      }
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Product"
+                        size="small"
+                        placeholder="Scan or search barcode"
+                      />
+                    )}
+                  />
 
-            <Typography variant="h6">Total: ₪{calculateTotal().toFixed(2)}</Typography>
+                  <TextField
+                    type="number"
+                    label="Qty"
+                    size="small"
+                    value={item.quantity}
+                    onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                    inputProps={{ min: 1, step: 1 }}
+                  />
 
-            <TextField
-              label="Notes"
-              multiline
-              rows={3}
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            />
+                  <TextField
+                    type="number"
+                    label="Price"
+                    size="small"
+                    value={item.unit_price}
+                    onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
+
+                  {formData.items.length > 1 && (
+                    <IconButton color="error" size="small" onClick={() => removeItem(index)}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Box>
+              );
+            })}
+
+            <Box display="flex" justifyContent="space-between" alignItems="center">
+              <Typography variant="subtitle2" color="text.secondary">
+                Order Total
+              </Typography>
+              <Typography variant="h6">₪{calculateTotal().toFixed(2)}</Typography>
+            </Box>
+
+            <Box display="flex" justifyContent="flex-end" alignItems="center" gap={1}>
+              <Tooltip title={showNotes ? 'Hide note' : 'Add note'}>
+                <IconButton
+                  size="small"
+                  onClick={() => setShowNotes((prev) => !prev)}
+                  color={showNotes || formData.notes ? 'primary' : 'default'}
+                >
+                  <EditNoteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+
+            {showNotes && (
+              <TextField
+                label="Sale Note"
+                multiline
+                minRows={2}
+                maxRows={4}
+                size="small"
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              />
+            )}
           </Box>
         </DialogContent>
         <DialogActions>

@@ -104,7 +104,9 @@ db.serialize(() => {
     amount REAL NOT NULL,
     description TEXT,
     expense_date TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    employee_id INTEGER,
+    FOREIGN KEY (employee_id) REFERENCES employees(id)
   )`, (err) => {
     if (err) console.error('Error creating expenses table:', err);
     else console.log('✅ Created expenses table');
@@ -112,6 +114,10 @@ db.serialize(() => {
   
   // Add type column if it doesn't exist (for existing databases)
   db.run(`ALTER TABLE expenses ADD COLUMN type TEXT DEFAULT 'expense'`, (err) => {
+    // Ignore error if column already exists
+  });
+
+  db.run(`ALTER TABLE expenses ADD COLUMN employee_id INTEGER`, (err) => {
     // Ignore error if column already exists
   });
 

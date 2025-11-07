@@ -138,11 +138,17 @@ db.serialize(() => {
     amount REAL NOT NULL,
     description TEXT,
     expense_date TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    employee_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES employees(id)
   )`);
   
   // Add type column if it doesn't exist (for existing databases)
   db.run(`ALTER TABLE expenses ADD COLUMN type TEXT DEFAULT 'expense'`, (err) => {
+    // Ignore error if column already exists
+  });
+
+  db.run(`ALTER TABLE expenses ADD COLUMN employee_id INTEGER`, (err) => {
     // Ignore error if column already exists
   });
 
@@ -166,8 +172,12 @@ const suppliersRoutes = require('./routes/suppliers')(db);
 const reportsRoutes = require('./routes/reports')(db);
 const financesRoutes = require('./routes/finances')(db);
 const excelBrowserRoutes = require('./routes/excelBrowser')(upload);
+const authRoutes = require('./routes/auth')(db);
+const discountRulesRoutes = require('./routes/discountRules')(db);
+const stickerRoutes = require('./routes/stickers')(db);
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/employees', employeesRoutes);
@@ -175,6 +185,8 @@ app.use('/api/suppliers', suppliersRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/finances', financesRoutes);
 app.use('/api/excel-browser', excelBrowserRoutes);
+app.use('/api/discount-rules', discountRulesRoutes);
+app.use('/api/generate-stickers', stickerRoutes);
 
 // Serve React app in production (for deployment)
 if (process.env.NODE_ENV === 'production') {
