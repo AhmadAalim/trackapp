@@ -23,6 +23,7 @@ import BusinessIcon from '@mui/icons-material/Business';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
+import BarChartIcon from '@mui/icons-material/BarChart';
 
 const drawerWidth = 240;
 
@@ -33,6 +34,7 @@ const menuItems = [
   { text: 'Employees', icon: <PeopleIcon />, path: '/employees' },
   { text: 'Suppliers', icon: <BusinessIcon />, path: '/suppliers' },
   { text: 'Income/Expense', icon: <AccountBalanceIcon />, path: '/finances' },
+  { text: 'Charts', icon: <BarChartIcon />, path: '/charts' },
   { text: 'Excel Browser', icon: <TableChartIcon />, path: '/excel-browser' },
   { text: 'Sticker Generator', icon: <LocalOfferIcon />, path: '/stickers' },
 ];
