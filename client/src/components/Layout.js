@@ -24,12 +24,14 @@ import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import BarChartIcon from '@mui/icons-material/BarChart';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 
 const drawerWidth = 240;
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
   { text: 'Inventory', icon: <InventoryIcon />, path: '/inventory' },
+  { text: 'Items', icon: <Inventory2Icon />, path: '/items' },
   { text: 'Sales', icon: <PointOfSaleIcon />, path: '/sales' },
   { text: 'Employees', icon: <PeopleIcon />, path: '/employees' },
   { text: 'Suppliers', icon: <BusinessIcon />, path: '/suppliers' },

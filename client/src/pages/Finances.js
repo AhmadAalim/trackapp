@@ -22,6 +22,7 @@ import {
   Grid,
   MenuItem,
   Tooltip,
+  Alert,
 } from '@mui/material';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import RemoveCircleIcon from '@mui/icons-material/RemoveCircle';
@@ -63,6 +64,7 @@ function Finances() {
   const [open, setOpen] = useState(false);
   const [recordType, setRecordType] = useState(null); // 'income' or 'expense'
   const [editing, setEditing] = useState(null);
+  const [editingRecord, setEditingRecord] = useState(null);
   const [stats, setStats] = useState({ totalIncome: 0, totalExpenses: 0, netAmount: 0 });
   const [employees, setEmployees] = useState([]);
   const [showDescription, setShowDescription] = useState(false);
@@ -118,6 +120,7 @@ function Finances() {
     setRecordType(type);
     if (record) {
       setEditing(record.id);
+      setEditingRecord(record);
       setFormData({
         category: record.category || '',
         amount:
@@ -134,6 +137,7 @@ function Finances() {
       setShowDescription(Boolean(record.description));
     } else {
       setEditing(null);
+      setEditingRecord(null);
       setFormData({
         category: '',
         amount: '',
@@ -149,6 +153,7 @@ function Finances() {
   const handleClose = () => {
     setOpen(false);
     setEditing(null);
+    setEditingRecord(null);
     setRecordType(null);
     setShowDescription(false);
   };
@@ -249,6 +254,62 @@ function Finances() {
   const isEmployeeWithdrawalCategory =
     recordType === 'expense' && formData.category === EMPLOYEE_WITHDRAWAL_CATEGORY;
 
+  const currentMonthKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
+
+  const selectedEmployee = useMemo(() => {
+    if (!formData.employee_id) {
+      return null;
+    }
+    return (
+      employees.find(
+        (employee) => String(employee.id) === String(formData.employee_id)
+      ) || null
+    );
+  }, [employees, formData.employee_id]);
+
+  const originalWithdrawalAmount = useMemo(() => {
+    if (
+      !editingRecord ||
+      editingRecord.type !== 'expense' ||
+      editingRecord.category !== EMPLOYEE_WITHDRAWAL_CATEGORY
+    ) {
+      return 0;
+    }
+
+    const editingEmployeeId =
+      editingRecord.employee_id !== undefined && editingRecord.employee_id !== null
+        ? String(editingRecord.employee_id)
+        : '';
+    const editingMonth = editingRecord.expense_date
+      ? editingRecord.expense_date.slice(0, 7)
+      : currentMonthKey;
+
+    if (
+      editingEmployeeId !== String(formData.employee_id || '') ||
+      editingMonth !== currentMonthKey
+    ) {
+      return 0;
+    }
+
+    const parsed = parseFloat(editingRecord.amount);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }, [editingRecord, formData.employee_id, currentMonthKey]);
+
+  const selectedEmployeeAllowance =
+    Number(selectedEmployee?.monthly_allowance ?? selectedEmployee?.salary ?? 0) || 0;
+  const selectedEmployeeWithdrawn = Number(selectedEmployee?.total_withdrawn || 0);
+  const adjustedWithdrawn = Math.max(selectedEmployeeWithdrawn - originalWithdrawalAmount, 0);
+  const remainingAllowance = Math.max(selectedEmployeeAllowance - adjustedWithdrawn, 0);
+
+  const amountNumber = parseFloat(formData.amount);
+  const amountIsNumber = !Number.isNaN(amountNumber);
+  const amountIsPositive = amountIsNumber && amountNumber > 0;
+  const projectedRemaining = amountIsNumber
+    ? Math.max(remainingAllowance - amountNumber, 0)
+    : remainingAllowance;
+  const withdrawalExceedsAllowance =
+    isEmployeeWithdrawalCategory && amountIsNumber && amountNumber > remainingAllowance + 0.0001;
+
   const formatCurrency = (value) => {
     const numberValue = Number(value ?? 0);
     if (Number.isNaN(numberValue)) {
@@ -260,6 +321,79 @@ function Finances() {
       maximumFractionDigits: 2,
     })}`;
   };
+
+  const amountValueProvided = formData.amount !== '';
+  const noAllowanceRemaining =
+    isEmployeeWithdrawalCategory && formData.employee_id && remainingAllowance <= 0;
+  const amountHasGeneralError = amountValueProvided && (!amountIsNumber || amountNumber <= 0);
+  const amountHasWithdrawalError =
+    isEmployeeWithdrawalCategory && formData.employee_id && withdrawalExceedsAllowance;
+  const amountError = amountHasGeneralError || amountHasWithdrawalError || noAllowanceRemaining;
+  const amountHelperText = (() => {
+    if (amountHasGeneralError) {
+      return 'Enter a positive amount.';
+    }
+    if (isEmployeeWithdrawalCategory) {
+      if (!formData.employee_id) {
+        return 'Select an employee to see allowance details.';
+      }
+      if (noAllowanceRemaining) {
+        return 'No allowance remaining for this employee this month.';
+      }
+      if (withdrawalExceedsAllowance) {
+        return `Amount exceeds remaining allowance of ${formatCurrency(remainingAllowance)}.`;
+      }
+      const afterText =
+        amountIsNumber && amountNumber > 0
+          ? ` • After withdrawal: ${formatCurrency(projectedRemaining)}`
+          : '';
+      return `Remaining allowance: ${formatCurrency(remainingAllowance)}${afterText}`;
+    }
+    return undefined;
+  })();
+
+  const withdrawalAlertSeverity = (() => {
+    if (!isEmployeeWithdrawalCategory) {
+      return 'info';
+    }
+    if (!formData.employee_id) {
+      return 'info';
+    }
+    if (withdrawalExceedsAllowance) {
+      return 'error';
+    }
+    if (remainingAllowance <= 0) {
+      return 'error';
+    }
+    return 'info';
+  })();
+
+  const withdrawalAlertMessage = (() => {
+    if (!isEmployeeWithdrawalCategory) {
+      return '';
+    }
+    if (!formData.employee_id) {
+      return 'Select an employee to see allowance details before recording the withdrawal.';
+    }
+    const employeeName = selectedEmployee?.name || 'This employee';
+    const baseDetails = `${employeeName} • Allowance: ${formatCurrency(
+      selectedEmployeeAllowance
+    )} • Withdrawn this month: ${formatCurrency(adjustedWithdrawn)} • Remaining: ${formatCurrency(
+      remainingAllowance
+    )}`;
+    if (withdrawalExceedsAllowance) {
+      return `${baseDetails}. Requested ${formatCurrency(
+        amountNumber
+      )} exceeds the remaining allowance. Reduce the amount.`;
+    }
+    if (remainingAllowance <= 0) {
+      return `${baseDetails}. No allowance remaining for additional withdrawals this month.`;
+    }
+    if (amountIsNumber && amountNumber > 0) {
+      return `${baseDetails} • After this withdrawal: ${formatCurrency(projectedRemaining)}.`;
+    }
+    return baseDetails;
+  })();
 
   const maskCurrency = (value) => {
     const formatted = formatCurrency(value);
@@ -509,7 +643,13 @@ function Finances() {
                 helperText={
                   employeeOptions.length === 0
                     ? 'Add employees in the Employees section before recording a withdrawal.'
-                    : 'Select the employee who received the withdrawal.'
+                    : formData.employee_id
+                      ? `Allowance: ${formatCurrency(
+                          selectedEmployeeAllowance
+                        )} • Withdrawn: ${formatCurrency(adjustedWithdrawn)} • Remaining: ${formatCurrency(
+                          remainingAllowance
+                        )}`
+                      : 'Select the employee who received the withdrawal.'
                 }
               >
                 {employeeOptions.length === 0 ? (
@@ -533,7 +673,14 @@ function Finances() {
               onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
               inputProps={{ step: '0.01', min: '0' }}
               required
+              error={amountError}
+              helperText={amountHelperText}
             />
+            {isEmployeeWithdrawalCategory && withdrawalAlertMessage && (
+              <Alert severity={withdrawalAlertSeverity} sx={{ mt: 1 }}>
+                {withdrawalAlertMessage}
+              </Alert>
+            )}
             <Box display="flex" justifyContent="flex-end">
               <Tooltip title={showDescription ? 'Hide notes' : 'Add notes'}>
                 <IconButton
@@ -582,8 +729,9 @@ function Finances() {
             disabled={
               !formData.category ||
               !formData.amount ||
+              !amountIsPositive ||
               (isEmployeeWithdrawalCategory &&
-                (employeeOptions.length === 0 || !formData.employee_id))
+                (employeeOptions.length === 0 || !formData.employee_id || withdrawalExceedsAllowance))
             }
             color={recordType === 'income' ? 'success' : 'error'}
           >
