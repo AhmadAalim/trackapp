@@ -187,23 +187,26 @@ function Items() {
   }, [loading, error, totalMatches, hasActiveSearch]);
 
   useEffect(() => {
+    // Capture ref value at the start of the effect
+    const currentVideoRef = videoRef.current;
+    const currentCodeReaderRef = codeReaderRef.current;
+
     if (!scannerOpen) {
-      if (codeReaderRef.current) {
+      if (currentCodeReaderRef) {
         try {
-          codeReaderRef.current.reset();
+          currentCodeReaderRef.reset();
         } catch (resetError) {
           console.error('Scanner reset error:', resetError);
         }
         codeReaderRef.current = null;
       }
-      const videoElement = videoRef.current;
-      if (videoElement) {
-        const stream = videoElement.srcObject;
+      if (currentVideoRef) {
+        const stream = currentVideoRef.srcObject;
         if (stream && typeof stream.getTracks === 'function') {
           stream.getTracks().forEach((track) => track.stop());
         }
-        if (videoElement.srcObject) {
-          videoElement.srcObject = null;
+        if (currentVideoRef.srcObject) {
+          currentVideoRef.srcObject = null;
         }
       }
       return undefined;
@@ -241,27 +244,30 @@ function Items() {
           videoInputDevices.find((device) => /back|rear|environment/i.test(device.label)) ||
           videoInputDevices[videoInputDevices.length - 1];
 
-        await codeReader.decodeFromVideoDevice(
-          environmentDevice?.deviceId,
-          videoRef.current,
-          (result, err) => {
-            if (cancelled) {
-              return;
-            }
-
-            if (result) {
-              const text = result.getText().trim();
-              if (text) {
-                setSearchInput(text);
-                setActiveSearch(text);
+        const videoElement = videoRef.current;
+        if (videoElement) {
+          await codeReader.decodeFromVideoDevice(
+            environmentDevice?.deviceId,
+            videoElement,
+            (result, err) => {
+              if (cancelled) {
+                return;
               }
-              handleScannerClose();
-            } else if (err && !(err instanceof NotFoundException)) {
-              console.error('Barcode scan error:', err);
-              setScannerError(err.message || 'Unable to read the barcode. Please try again.');
+
+              if (result) {
+                const text = result.getText().trim();
+                if (text) {
+                  setSearchInput(text);
+                  setActiveSearch(text);
+                }
+                handleScannerClose();
+              } else if (err && !(err instanceof NotFoundException)) {
+                console.error('Barcode scan error:', err);
+                setScannerError(err.message || 'Unable to read the barcode. Please try again.');
+              }
             }
-          }
-        );
+          );
+        }
       } catch (scanError) {
         console.error('Failed to start barcode scanner:', scanError);
         if (!cancelled) {
@@ -276,22 +282,24 @@ function Items() {
 
     return () => {
       cancelled = true;
-      if (codeReaderRef.current) {
+      const cleanupCodeReader = codeReaderRef.current;
+      if (cleanupCodeReader) {
         try {
-          codeReaderRef.current.reset();
+          cleanupCodeReader.reset();
         } catch (resetError) {
           console.error('Scanner reset error:', resetError);
         }
         codeReaderRef.current = null;
       }
-      const videoElement = videoRef.current;
-      if (videoElement) {
-        const stream = videoElement.srcObject;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const cleanupVideoRef = videoRef.current;
+      if (cleanupVideoRef) {
+        const stream = cleanupVideoRef.srcObject;
         if (stream && typeof stream.getTracks === 'function') {
           stream.getTracks().forEach((track) => track.stop());
         }
-        if (videoElement.srcObject) {
-          videoElement.srcObject = null;
+        if (cleanupVideoRef.srcObject) {
+          cleanupVideoRef.srcObject = null;
         }
       }
     };

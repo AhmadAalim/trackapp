@@ -84,7 +84,6 @@ function LowStock() {
             ) : (
               products.map((product) => {
                 const isCritical = product.stock_quantity === 0;
-                const isLow = product.stock_quantity > 0 && product.stock_quantity <= product.min_stock_level;
                 
                 return (
                   <TableRow key={product.id}>

@@ -1,0 +1,9 @@
+node_modules/
+*.db
+*.sqlite
+*.sqlite3
+uploads/*
+!uploads/.gitkeep
+excel_history/*
+!excel_history/.gitkeep
+

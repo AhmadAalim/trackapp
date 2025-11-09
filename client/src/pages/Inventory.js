@@ -34,7 +34,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import SearchIcon from '@mui/icons-material/Search';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
@@ -59,7 +58,7 @@ function Inventory() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [imagePreview, setImagePreview] = useState(null);
-  const [importing, setImporting] = useState(false);
+  const [, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState(null);
   const [failedImportRows, setFailedImportRows] = useState([]);
   const [retryingRowIndex, setRetryingRowIndex] = useState(null);
@@ -565,6 +564,7 @@ function Inventory() {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars
   const handleExcelImport = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
