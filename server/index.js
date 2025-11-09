@@ -223,12 +223,21 @@ app.get('/', (req, res) => {
   });
 });
 
-// Serve React app in production (for deployment)
+// Serve React app in production (only if build directory exists)
+// Note: Frontend is deployed separately on Vercel, so this is optional
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/build')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/build/index.html'));
-  });
+  const buildPath = path.join(__dirname, '../client/build');
+  if (fs.existsSync(buildPath)) {
+    app.use(express.static(buildPath));
+    app.get('*', (req, res) => {
+      // Only serve React app for non-API routes
+      if (!req.path.startsWith('/api')) {
+        res.sendFile(path.join(buildPath, 'index.html'));
+      } else {
+        res.status(404).json({ error: 'API endpoint not found' });
+      }
+    });
+  }
 }
 
 // Export for Vercel serverless
