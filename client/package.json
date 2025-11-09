@@ -10,6 +10,7 @@
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "axios": "^1.6.2",
+    "express": "^4.21.2",
     "react": "^18.2.0",
     "react-barcode": "^1.6.1",
     "react-dom": "^18.2.0",
@@ -22,7 +23,8 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "serve": "node server.js"
   },
   "eslintConfig": {
     "extends": [
