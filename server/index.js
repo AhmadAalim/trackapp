@@ -210,6 +210,19 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Server is running' });
 });
 
+// Root route for testing
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'TrackApp Backend API', 
+    status: 'running',
+    endpoints: {
+      health: '/api/health',
+      inventory: '/api/inventory',
+      sales: '/api/sales'
+    }
+  });
+});
+
 // Serve React app in production (for deployment)
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../client/build')));
@@ -223,7 +236,7 @@ module.exports = app;
 
 // Only listen if not in Vercel environment
 if (process.env.VERCEL !== '1') {
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
   });
 }
