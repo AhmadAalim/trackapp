@@ -246,27 +246,27 @@ function Items() {
 
         const videoElement = videoRef.current;
         if (videoElement) {
-          await codeReader.decodeFromVideoDevice(
-            environmentDevice?.deviceId,
+        await codeReader.decodeFromVideoDevice(
+          environmentDevice?.deviceId,
             videoElement,
-            (result, err) => {
-              if (cancelled) {
-                return;
-              }
-
-              if (result) {
-                const text = result.getText().trim();
-                if (text) {
-                  setSearchInput(text);
-                  setActiveSearch(text);
-                }
-                handleScannerClose();
-              } else if (err && !(err instanceof NotFoundException)) {
-                console.error('Barcode scan error:', err);
-                setScannerError(err.message || 'Unable to read the barcode. Please try again.');
-              }
+          (result, err) => {
+            if (cancelled) {
+              return;
             }
-          );
+
+            if (result) {
+              const text = result.getText().trim();
+              if (text) {
+                setSearchInput(text);
+                setActiveSearch(text);
+              }
+              handleScannerClose();
+            } else if (err && !(err instanceof NotFoundException)) {
+              console.error('Barcode scan error:', err);
+              setScannerError(err.message || 'Unable to read the barcode. Please try again.');
+            }
+          }
+        );
         }
       } catch (scanError) {
         console.error('Failed to start barcode scanner:', scanError);

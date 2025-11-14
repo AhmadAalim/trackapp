@@ -70,34 +70,95 @@ module.exports = (db) => {
     db.get(`${baseSelectQuery} WHERE expenses.id = ?`, [id], callback);
   };
 
-  // Get all income/expense records
+  // Get all income/expense records (including sales)
   router.get('/', (req, res) => {
     const { type, startDate, endDate } = req.query;
-    let query = `${baseSelectQuery} WHERE 1=1`;
-    const params = [];
+    let expenseQuery = `${baseSelectQuery} WHERE 1=1`;
+    const expenseParams = [];
 
     if (type) {
-      query += ' AND expenses.type = ?';
-      params.push(type);
+      // If type is 'expense', only get expenses
+      // If type is 'income', get both income records AND sales
+      if (type === 'expense') {
+        expenseQuery += ' AND expenses.type = ?';
+        expenseParams.push(type);
+      } else if (type === 'income') {
+        expenseQuery += ' AND expenses.type = ?';
+        expenseParams.push(type);
+        // Sales will be added separately below
+      }
     }
 
     if (startDate) {
-      query += ' AND DATE(expenses.expense_date) >= ?';
-      params.push(startDate);
+      expenseQuery += ' AND DATE(expenses.expense_date) >= ?';
+      expenseParams.push(startDate);
     }
 
     if (endDate) {
-      query += ' AND DATE(expenses.expense_date) <= ?';
-      params.push(endDate);
+      expenseQuery += ' AND DATE(expenses.expense_date) <= ?';
+      expenseParams.push(endDate);
     }
 
-    query += ' ORDER BY expenses.expense_date DESC, expenses.created_at DESC';
+    expenseQuery += ' ORDER BY expenses.expense_date DESC, expenses.created_at DESC';
 
-    db.all(query, params, (err, rows) => {
+    // Get expense/income records
+    db.all(expenseQuery, expenseParams, (err, expenseRows) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
-      res.json(rows);
+
+      // If type is 'expense', don't include sales
+      if (type === 'expense') {
+        return res.json(expenseRows);
+      }
+
+      // Get sales records
+      let salesQuery = `
+        SELECT 
+          s.id,
+          s.sale_date as expense_date,
+          s.total_amount as amount,
+          s.payment_method,
+          s.employee_id,
+          s.notes as description,
+          e.name as employee_name,
+          'income' as type,
+          'Sales' as category
+        FROM sales s
+        LEFT JOIN employees e ON s.employee_id = e.id
+        WHERE 1=1
+      `;
+      const salesParams = [];
+
+      if (startDate) {
+        salesQuery += ' AND DATE(s.sale_date) >= ?';
+        salesParams.push(startDate);
+      }
+
+      if (endDate) {
+        salesQuery += ' AND DATE(s.sale_date) <= ?';
+        salesParams.push(endDate);
+      }
+
+      salesQuery += ' ORDER BY s.sale_date DESC';
+
+      db.all(salesQuery, salesParams, (salesErr, salesRows) => {
+        if (salesErr) {
+          return res.status(500).json({ error: salesErr.message });
+        }
+
+        // Combine expense/income records with sales
+        const allRecords = [...expenseRows, ...salesRows];
+
+        // Sort by date (most recent first)
+        allRecords.sort((a, b) => {
+          const dateA = new Date(a.expense_date || a.sale_date || 0);
+          const dateB = new Date(b.expense_date || b.sale_date || 0);
+          return dateB - dateA;
+        });
+
+        res.json(allRecords);
+      });
     });
   });
 
@@ -303,30 +364,45 @@ module.exports = (db) => {
   // Get summary statistics
   router.get('/summary/stats', (req, res) => {
     const { startDate, endDate } = req.query;
-    let whereClause = 'WHERE 1=1';
-    const params = [];
+    let expenseWhereClause = 'WHERE 1=1';
+    let salesWhereClause = 'WHERE 1=1';
+    const expenseParams = [];
+    const salesParams = [];
 
     if (startDate) {
-      whereClause += ' AND DATE(expense_date) >= ?';
-      params.push(startDate);
+      expenseWhereClause += ' AND DATE(expense_date) >= ?';
+      expenseParams.push(startDate);
+      salesWhereClause += ' AND DATE(sale_date) >= ?';
+      salesParams.push(startDate);
     }
 
     if (endDate) {
-      whereClause += ' AND DATE(expense_date) <= ?';
-      params.push(endDate);
+      expenseWhereClause += ' AND DATE(expense_date) <= ?';
+      expenseParams.push(endDate);
+      salesWhereClause += ' AND DATE(sale_date) <= ?';
+      salesParams.push(endDate);
     }
 
-    const query = `
+    const expenseQuery = `
       SELECT 
         type,
         COALESCE(SUM(amount), 0) as total,
         COUNT(*) as count
       FROM expenses
-      ${whereClause}
+      ${expenseWhereClause}
       GROUP BY type
     `;
 
-    db.all(query, params, (err, rows) => {
+    const salesQuery = `
+      SELECT 
+        COALESCE(SUM(total_amount), 0) as total,
+        COUNT(*) as count
+      FROM sales
+      ${salesWhereClause}
+    `;
+
+    // First, get expense/income stats
+    db.all(expenseQuery, expenseParams, (err, rows) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
@@ -337,6 +413,7 @@ module.exports = (db) => {
         netAmount: 0,
         incomeCount: 0,
         expenseCount: 0,
+        salesCount: 0,
       };
 
       rows.forEach((row) => {
@@ -349,9 +426,24 @@ module.exports = (db) => {
         }
       });
 
-      stats.netAmount = stats.totalIncome - stats.totalExpenses;
+      // Then, get sales totals and add to income
+      db.get(salesQuery, salesParams, (salesErr, salesRow) => {
+        if (salesErr) {
+          return res.status(500).json({ error: salesErr.message });
+        }
 
-      res.json(stats);
+        const salesTotal = salesRow?.total || 0;
+        const salesCount = salesRow?.count || 0;
+        
+        // Add sales to total income
+        stats.totalIncome = (stats.totalIncome || 0) + salesTotal;
+        stats.salesCount = salesCount;
+        
+        // Recalculate net amount with sales included
+        stats.netAmount = stats.totalIncome - stats.totalExpenses;
+
+        res.json(stats);
+      });
     });
   });
 

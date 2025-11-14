@@ -15,7 +15,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { salesAPI, financesAPI } from '../services/api';
+import { salesAPI, financesAPI, inventoryAPI } from '../services/api';
 
 const currencyFormatter = (value) => {
   const numeric = Number(value) || 0;
@@ -53,23 +53,70 @@ const SummaryStatCard = ({ title, value, caption, color }) => (
   <Paper
     elevation={0}
     sx={{
-      p: 3,
+      p: 2,
       height: '100%',
       borderRadius: 2,
       border: (theme) => `1px solid ${theme.palette.divider}`,
       display: 'flex',
       flexDirection: 'column',
-      gap: 1,
+      gap: 0.5,
+      overflow: 'hidden',
+      minHeight: 0,
     }}
   >
-    <Typography variant="subtitle2" color="text.secondary">
+    <Typography 
+      variant="caption" 
+      color="text.secondary"
+      sx={{
+        fontSize: '0.7rem',
+        fontWeight: 500,
+        lineHeight: 1.2,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
+    >
       {title}
     </Typography>
-    <Typography variant="h5" sx={{ color: color || 'text.primary' }}>
-      {value}
-    </Typography>
+    <Box
+      sx={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        minHeight: 0,
+        overflow: 'hidden',
+      }}
+    >
+      <Typography 
+        variant="h6" 
+        sx={{ 
+          color: color || 'text.primary',
+          fontSize: '0.9rem',
+          fontWeight: 600,
+          lineHeight: 1.2,
+          wordBreak: 'break-word',
+          overflowWrap: 'break-word',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          width: '100%',
+        }}
+      >
+        {value}
+      </Typography>
+    </Box>
     {caption ? (
-      <Typography variant="body2" color="text.secondary">
+      <Typography 
+        variant="caption" 
+        color="text.secondary"
+        sx={{
+          fontSize: '0.65rem',
+          lineHeight: 1.2,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          mt: 'auto',
+        }}
+      >
         {caption}
       </Typography>
     ) : null}
@@ -125,6 +172,7 @@ const ChartCard = ({ title, subtitle, children, hasData, emptyMessage }) => (
 function Charts() {
   const [sales, setSales] = useState([]);
   const [finances, setFinances] = useState([]);
+  const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -135,14 +183,16 @@ function Charts() {
       setLoading(true);
       setError(null);
       try {
-        const [salesResponse, financesResponse] = await Promise.all([
+        const [salesResponse, financesResponse, inventoryResponse] = await Promise.all([
           salesAPI.getAll(),
           financesAPI.getAll(),
+          inventoryAPI.getAll(),
         ]);
 
         if (!isMounted) return;
         setSales(Array.isArray(salesResponse.data) ? salesResponse.data : []);
         setFinances(Array.isArray(financesResponse.data) ? financesResponse.data : []);
+        setInventory(Array.isArray(inventoryResponse.data) ? inventoryResponse.data : []);
       } catch (err) {
         if (!isMounted) return;
         const message = err.response?.data?.error || err.message || 'Failed to load charts data';
@@ -325,6 +375,66 @@ function Charts() {
     };
   }, [finances]);
 
+  const costOfGoodsSummary = useMemo(() => {
+    if (!Array.isArray(inventory) || inventory.length === 0) {
+      return {
+        totalCOGS: 0,
+        totalInventoryValue: 0,
+        productCount: 0,
+        totalStockQuantity: 0,
+      };
+    }
+
+    let totalCOGS = 0;
+    let totalInventoryValue = 0;
+    let totalStockQuantity = 0;
+
+    inventory.forEach((product) => {
+      // Try multiple field names for cost (cost, cost_price, Cost, Cost Price, etc.)
+      const cost = Number(
+        product.cost ?? 
+        product.cost_price ?? 
+        product.Cost ?? 
+        product['Cost Price'] ?? 
+        0
+      ) || 0;
+      
+      const stockQuantity = Number(product.stock_quantity ?? product.quantity ?? product.stock ?? 0) || 0;
+      const price = Number(product.price ?? product.selling_price ?? 0) || 0;
+
+      // Cost of Goods = cost * stock_quantity
+      totalCOGS += cost * stockQuantity;
+      
+      // Inventory Value = price * stock_quantity (selling value)
+      totalInventoryValue += price * stockQuantity;
+      
+      totalStockQuantity += stockQuantity;
+    });
+
+    return {
+      totalCOGS,
+      totalInventoryValue,
+      productCount: inventory.length,
+      totalStockQuantity,
+    };
+  }, [inventory]);
+
+  const totalRecommendedSellingPrice = useMemo(() => {
+    if (!Array.isArray(inventory) || inventory.length === 0) {
+      return 0;
+    }
+
+    let total = 0;
+    inventory.forEach((product) => {
+      const price = Number(product.price ?? product.selling_price ?? 0) || 0;
+      const stockQuantity = Number(product.stock_quantity ?? product.quantity ?? 0) || 0;
+      // Multiply price by stock quantity to get total value for all units
+      total += price * stockQuantity;
+    });
+
+    return total;
+  }, [inventory]);
+
   const salesPaymentMethodData = useMemo(() => {
     const data = salesSummary.salesByMethod
       .map((entry) => ({
@@ -336,6 +446,37 @@ function Charts() {
     return data;
   }, [salesSummary.salesByMethod]);
   const hasSalesPaymentMethodData = salesPaymentMethodData.some((entry) => entry.value > 0);
+
+  const cogsByCategoryData = useMemo(() => {
+    const totals = new Map();
+
+    inventory.forEach((product) => {
+      const cost = Number(product.cost ?? product.cost_price ?? 0) || 0;
+      const stockQuantity = Number(product.stock_quantity ?? product.quantity ?? 0) || 0;
+      const category = product.category || 'Uncategorized';
+      
+      // COGS for this product = cost * stock_quantity
+      const productCOGS = cost * stockQuantity;
+      
+      if (productCOGS > 0) {
+        totals.set(category, (totals.get(category) || 0) + productCOGS);
+      }
+    });
+
+    const sorted = Array.from(totals.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
+    if (sorted.length <= 6) {
+      return sorted;
+    }
+
+    const topFive = sorted.slice(0, 5);
+    const otherTotal = sorted.slice(5).reduce((sum, item) => sum + item.value, 0);
+    return [...topFive, { name: 'Other', value: otherTotal }];
+  }, [inventory]);
+
+  const hasCogsByCategoryData = cogsByCategoryData.some((entry) => entry.value > 0);
 
   const formatDateTime = (date) => {
     if (!date) return 'No records yet';
@@ -371,10 +512,10 @@ function Charts() {
         ) : error ? (
           <Alert severity="error">{error}</Alert>
         ) : (
-          <Grid container spacing={3}>
+          <Grid container spacing={2}>
             <Grid item xs={12}>
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={3}>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6} md={4}>
                   <SummaryStatCard
                     title="Total Sales Revenue"
                     value={currencyTooltipFormatter(salesSummary.totalRevenue)}
@@ -382,7 +523,7 @@ function Charts() {
                     color="#1E88E5"
                   />
                 </Grid>
-                <Grid item xs={12} md={3}>
+                <Grid item xs={12} sm={6} md={4}>
                   <SummaryStatCard
                     title="Average Order Value"
                     value={currencyTooltipFormatter(salesSummary.averageOrder)}
@@ -390,7 +531,23 @@ function Charts() {
                     color="#43A047"
                   />
                 </Grid>
-                <Grid item xs={12} md={3}>
+                <Grid item xs={12} sm={6} md={4}>
+                  <SummaryStatCard
+                    title="Cost of Goods (COGS)"
+                    value={currencyTooltipFormatter(costOfGoodsSummary.totalCOGS)}
+                    caption={`${costOfGoodsSummary.productCount} products • ${costOfGoodsSummary.totalStockQuantity.toLocaleString()} units`}
+                    color="#FB8C00"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6} md={4}>
+                  <SummaryStatCard
+                    title="Total Recommended Selling Price"
+                    value={currencyTooltipFormatter(totalRecommendedSellingPrice)}
+                    caption={`All units in store (${costOfGoodsSummary.totalStockQuantity.toLocaleString()} units)`}
+                    color="#8E24AA"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6} md={4}>
                   <SummaryStatCard
                     title="Income Recorded"
                     value={currencyTooltipFormatter(financesSummary.totalIncome)}
@@ -398,7 +555,7 @@ function Charts() {
                     color="#00ACC1"
                   />
                 </Grid>
-                <Grid item xs={12} md={3}>
+                <Grid item xs={12} sm={6} md={4}>
                   <SummaryStatCard
                     title="Net Income"
                     value={currencyTooltipFormatter(financesSummary.net)}

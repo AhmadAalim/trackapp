@@ -119,7 +119,7 @@ module.exports = app;
 
 // Only listen if not in Vercel environment
 if (process.env.VERCEL !== '1') {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 }

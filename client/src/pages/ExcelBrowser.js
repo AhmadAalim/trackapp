@@ -15,10 +15,18 @@ import {
   Alert,
   Chip,
   IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  MenuItem,
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
+import SaveIcon from '@mui/icons-material/Save';
 import { excelBrowserAPI, inventoryAPI } from '../services/api';
 
 function ExcelBrowser() {
@@ -37,6 +45,9 @@ function ExcelBrowser() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState(null);
   const [selectedHistoryId, setSelectedHistoryId] = useState(null);
+  const [failedItemsDialogOpen, setFailedItemsDialogOpen] = useState(false);
+  const [failedItems, setFailedItems] = useState([]);
+  const [editingItemIndex, setEditingItemIndex] = useState(null);
   const applyParsedResult = useCallback((payload = {}, options = {}) => {
     const {
       fileName: overrideFileName,
@@ -409,7 +420,9 @@ function ExcelBrowser() {
       return isNaN(parsed) ? defaultValue : parsed;
     };
 
+    // Track ALL original rows with their row numbers
     const parsedRows = [];
+    const originalRowMap = new Map(); // Maps merged key to original row indices
 
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
@@ -468,20 +481,24 @@ function ExcelBrowser() {
         min_stock_level: 10,
         supplier_id: null,
         image_url: null,
+        originalRowNumber: i + 1, // Track original row number
+        originalRowData: row, // Keep original row data
       };
 
-      parsedRows.push({ productData });
+      parsedRows.push({ productData, originalIndex: i });
     }
 
-    // Merge duplicates by barcode while summing quantities
+    // Merge duplicates by barcode while tracking which rows were merged
     const mergedByBarcode = new Map();
     const uniqueItems = [];
+    const mergedRowsTracker = new Map(); // Track which original rows were merged
 
-    parsedRows.forEach(({ productData }) => {
+    parsedRows.forEach(({ productData, originalIndex }) => {
       const key = (productData.description || '').replace(/\s+/g, '').toLowerCase();
       if (key) {
         if (!mergedByBarcode.has(key)) {
           mergedByBarcode.set(key, { ...productData });
+          mergedRowsTracker.set(key, [originalIndex]);
         } else {
           const existing = mergedByBarcode.get(key);
           existing.stock_quantity += productData.stock_quantity;
@@ -490,6 +507,7 @@ function ExcelBrowser() {
           if (!existing.cost && productData.cost) existing.cost = productData.cost;
           if (!existing.price && productData.price) existing.price = productData.price;
           mergedByBarcode.set(key, existing);
+          mergedRowsTracker.get(key).push(originalIndex);
         }
       } else {
         uniqueItems.push(productData);
@@ -497,33 +515,179 @@ function ExcelBrowser() {
     });
 
     const itemsToUpload = [...mergedByBarcode.values(), ...uniqueItems];
+    const totalOriginalRows = data.length;
 
     setAddAllProgress({ done: 0, total: itemsToUpload.length, success: 0, errors: 0 });
 
     let successCount = 0;
     let errorCount = 0;
+    const failedItemsList = [];
+    const successfullyAddedKeys = new Set(); // Track which merged keys were successfully added
 
     for (let i = 0; i < itemsToUpload.length; i++) {
       const productData = itemsToUpload[i];
+      const key = (productData.description || '').replace(/\s+/g, '').toLowerCase();
+      
       try {
         await inventoryAPI.create(productData);
         successCount++;
+        if (key) {
+          successfullyAddedKeys.add(key);
+        }
         setAddAllProgress(prev => ({ ...prev, done: prev.done + 1, success: prev.success + 1 }));
       } catch (err) {
         console.error(`Error adding aggregated item ${i + 1} to inventory:`, err);
         errorCount++;
         setAddAllProgress(prev => ({ ...prev, done: prev.done + 1, errors: prev.errors + 1 }));
+        
+        // Collect failed item with error message
+        const errorMessage = err.response?.data?.error || err.message || 'Unknown error';
+        failedItemsList.push({
+          ...productData,
+          error: errorMessage,
+          originalIndex: i,
+          isMerged: key && mergedRowsTracker.has(key) && mergedRowsTracker.get(key).length > 1,
+          mergedRowCount: key && mergedRowsTracker.has(key) ? mergedRowsTracker.get(key).length : 0,
+        });
       }
     }
 
+    // Now find ALL items that weren't successfully added
+    // This includes items that were merged but the merged item failed
+    const allFailedItems = [...failedItemsList];
+    
+    // Add items that were merged but the merged item failed
+    mergedRowsTracker.forEach((originalIndices, key) => {
+      if (!successfullyAddedKeys.has(key)) {
+        // The merged item failed, so all original rows that were merged are "failed"
+        originalIndices.forEach(originalIndex => {
+          const parsedRow = parsedRows[originalIndex];
+          if (parsedRow) {
+            // Check if already in failedItemsList
+            const alreadyAdded = allFailedItems.some(item => 
+              item.originalRowNumber === parsedRow.productData.originalRowNumber
+            );
+            if (!alreadyAdded) {
+              allFailedItems.push({
+                ...parsedRow.productData,
+                error: `Merged with ${originalIndices.length} other item(s) - merged item failed to add`,
+                originalIndex: originalIndex,
+                isMerged: true,
+                mergedRowCount: originalIndices.length,
+              });
+            }
+          }
+        });
+      }
+    });
+
+    // Also track items that were successfully merged (to show in summary)
+    const mergedSuccessfully = [];
+    mergedRowsTracker.forEach((originalIndices, key) => {
+      if (successfullyAddedKeys.has(key) && originalIndices.length > 1) {
+        mergedSuccessfully.push({
+          key,
+          count: originalIndices.length,
+          originalIndices,
+        });
+      }
+    });
+
     setAddingAll(false);
 
-    alert(
-      `Import completed!\n\n` +
-      `✅ Successfully added: ${successCount} product(s)\n` +
-      `${errorCount > 0 ? `❌ Errors: ${errorCount} product(s)\n` : ''}` +
-      `Total processed after merging duplicates: ${itemsToUpload.length} item(s)`
+    // Calculate totals
+    const totalMergedRows = mergedSuccessfully.reduce((sum, m) => sum + m.count, 0);
+    const totalFailedRows = allFailedItems.length;
+    const totalSuccessRows = successCount;
+
+    // Always show the dialog if there are any failed items OR if items were merged
+    if (allFailedItems.length > 0) {
+      setFailedItems(allFailedItems);
+      setFailedItemsDialogOpen(true);
+      
+      alert(
+        `Import Summary:\n\n` +
+        `📊 Total rows in Excel: ${totalOriginalRows}\n` +
+        `✅ Successfully added: ${totalSuccessRows} product(s)\n` +
+        `${totalMergedRows > 0 ? `🔄 Merged duplicates: ${totalMergedRows} row(s) into ${mergedSuccessfully.length} product(s)\n` : ''}` +
+        `❌ Failed/Not added: ${totalFailedRows} item(s)\n\n` +
+        `A dialog will open showing all items that weren't added.`
+      );
+    } else if (totalMergedRows > 0) {
+      // Show info about merged items even if all succeeded
+      alert(
+        `Import completed!\n\n` +
+        `📊 Total rows in Excel: ${totalOriginalRows}\n` +
+        `✅ Successfully added: ${totalSuccessRows} product(s)\n` +
+        `🔄 Merged duplicates: ${totalMergedRows} row(s) into ${mergedSuccessfully.length} product(s)\n` +
+        `Total unique items after merging: ${itemsToUpload.length}`
+      );
+    } else {
+      alert(
+        `Import completed!\n\n` +
+        `✅ Successfully added: ${totalSuccessRows} product(s)\n` +
+        `Total processed: ${itemsToUpload.length} item(s)`
+      );
+    }
+  };
+
+  const handleEditFailedItem = (index) => {
+    setEditingItemIndex(index);
+  };
+
+  const handleRetryFailedItem = async (index) => {
+    const item = failedItems[index];
+    try {
+      await inventoryAPI.create(item);
+      // Remove from failed items list
+      const updated = failedItems.filter((_, i) => i !== index);
+      setFailedItems(updated);
+      alert(`Product "${item.name}" added successfully!`);
+    } catch (err) {
+      const errorMessage = err.response?.data?.error || err.message || 'Unknown error';
+      // Update error message
+      const updated = [...failedItems];
+      updated[index] = { ...updated[index], error: errorMessage };
+      setFailedItems(updated);
+      alert(`Error: ${errorMessage}`);
+    }
+  };
+
+  const handleRetryAllFailedItems = async () => {
+    if (failedItems.length === 0) return;
+    
+    const confirmRetry = window.confirm(
+      `Retry adding all ${failedItems.length} failed item(s)?`
     );
+    if (!confirmRetry) return;
+
+    const itemsToRetry = [...failedItems];
+    const stillFailed = [];
+    let successCount = 0;
+
+    for (let i = 0; i < itemsToRetry.length; i++) {
+      const item = itemsToRetry[i];
+      try {
+        await inventoryAPI.create(item);
+        successCount++;
+      } catch (err) {
+        const errorMessage = err.response?.data?.error || err.message || 'Unknown error';
+        stillFailed.push({ ...item, error: errorMessage });
+      }
+    }
+
+    setFailedItems(stillFailed);
+    
+    if (stillFailed.length === 0) {
+      setFailedItemsDialogOpen(false);
+      alert(`All items added successfully!`);
+    } else {
+      alert(
+        `Retry completed!\n\n` +
+        `✅ Successfully added: ${successCount} product(s)\n` +
+        `❌ Still failed: ${stillFailed.length} product(s)`
+      );
+    }
   };
 
   return (
@@ -897,6 +1061,214 @@ Sheets: ${entry.sheetCount ?? 0} • Rows: ${entry.totalRows ?? 0}`}
           )}
         </Paper>
       )}
+
+      {/* Failed Items Dialog */}
+      <Dialog
+        open={failedItemsDialogOpen}
+        onClose={() => setFailedItemsDialogOpen(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              Failed Items ({failedItems.length})
+            </Typography>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleRetryAllFailedItems}
+              disabled={failedItems.length === 0}
+            >
+              Retry All
+            </Button>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TableContainer sx={{ maxHeight: '60vh' }}>
+            <Table stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Row #</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Name</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Description/Barcode</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Price</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Cost</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Stock</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Error/Reason</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {failedItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} align="center">
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
+                        No failed items
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  failedItems.map((item, index) => {
+                    const isEditing = editingItemIndex === index;
+                    return (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                            {item.originalRowNumber || index + 1}
+                            {item.isMerged && item.mergedRowCount > 1 && (
+                              <Chip
+                                label={`Merged (${item.mergedRowCount})`}
+                                size="small"
+                                color="warning"
+                                sx={{ ml: 0.5 }}
+                              />
+                            )}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          {isEditing ? (
+                            <TextField
+                              size="small"
+                              fullWidth
+                              value={item.name || ''}
+                              onChange={(e) => {
+                                const updated = [...failedItems];
+                                updated[index] = { ...updated[index], name: e.target.value };
+                                setFailedItems(updated);
+                              }}
+                            />
+                          ) : (
+                            item.name || '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {isEditing ? (
+                            <TextField
+                              size="small"
+                              fullWidth
+                              value={item.description || ''}
+                              onChange={(e) => {
+                                const updated = [...failedItems];
+                                updated[index] = { ...updated[index], description: e.target.value };
+                                setFailedItems(updated);
+                              }}
+                            />
+                          ) : (
+                            item.description || '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {isEditing ? (
+                            <TextField
+                              size="small"
+                              type="number"
+                              fullWidth
+                              value={item.price || 0}
+                              onChange={(e) => {
+                                const updated = [...failedItems];
+                                updated[index] = { ...updated[index], price: parseFloat(e.target.value) || 0 };
+                                setFailedItems(updated);
+                              }}
+                            />
+                          ) : (
+                            `₪${(item.price || 0).toFixed(2)}`
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {isEditing ? (
+                            <TextField
+                              size="small"
+                              type="number"
+                              fullWidth
+                              value={item.cost || 0}
+                              onChange={(e) => {
+                                const updated = [...failedItems];
+                                updated[index] = { ...updated[index], cost: parseFloat(e.target.value) || 0 };
+                                setFailedItems(updated);
+                              }}
+                            />
+                          ) : (
+                            `₪${(item.cost || 0).toFixed(2)}`
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {isEditing ? (
+                            <TextField
+                              size="small"
+                              type="number"
+                              fullWidth
+                              value={item.stock_quantity || 0}
+                              onChange={(e) => {
+                                const updated = [...failedItems];
+                                updated[index] = { ...updated[index], stock_quantity: parseInt(e.target.value) || 0 };
+                                setFailedItems(updated);
+                              }}
+                            />
+                          ) : (
+                            item.stock_quantity || 0
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Alert 
+                            severity={item.isMerged ? "warning" : "error"} 
+                            sx={{ py: 0.5, fontSize: '0.75rem' }}
+                          >
+                            {item.error || 'Unknown error'}
+                            {item.isMerged && item.mergedRowCount > 1 && (
+                              <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                                This item was merged with {item.mergedRowCount - 1} other item(s) with the same barcode
+                              </Typography>
+                            )}
+                          </Alert>
+                        </TableCell>
+                        <TableCell>
+                          <Box display="flex" gap={0.5}>
+                            {isEditing ? (
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => {
+                                  setEditingItemIndex(null);
+                                }}
+                                title="Save"
+                              >
+                                <SaveIcon fontSize="small" />
+                              </IconButton>
+                            ) : (
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => handleEditFailedItem(index)}
+                                title="Edit"
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            )}
+                            <IconButton
+                              size="small"
+                              color="success"
+                              onClick={() => handleRetryFailedItem(index)}
+                              title="Retry"
+                            >
+                              <AddIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFailedItemsDialogOpen(false)}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }

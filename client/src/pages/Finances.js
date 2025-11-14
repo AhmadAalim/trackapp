@@ -205,7 +205,13 @@ function Finances() {
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id, record) => {
+    // Prevent deleting sales records (they're managed in Sales page)
+    if (record && record.category === 'Sales' && record.payment_method !== undefined) {
+      alert('Sales records cannot be deleted from this page. Please manage them in the Sales page.');
+      return;
+    }
+    
     if (window.confirm('Are you sure you want to delete this record?')) {
       try {
         await financesAPI.delete(id);
@@ -550,9 +556,14 @@ function Finances() {
                 const employeeName =
                   record.employee_name ||
                   (record.employee_id ? employeeMap[record.employee_id] : null);
+                
+                // Check if this is a sale record (sales have category 'Sales' and come from sales table)
+                const isSale = record.category === 'Sales' && record.payment_method !== undefined;
+                // Use a unique key that includes the source to avoid conflicts
+                const recordKey = isSale ? `sale-${record.id}` : `expense-${record.id}`;
 
                 return (
-                  <TableRow key={record.id}>
+                  <TableRow key={recordKey}>
                     <TableCell>
                       <Chip
                         label={record.type === 'income' ? 'Income' : 'Expense'}
@@ -560,7 +571,17 @@ function Finances() {
                         size="small"
                       />
                     </TableCell>
-                    <TableCell>{record.category}</TableCell>
+                    <TableCell>
+                      {record.category}
+                      {isSale && (
+                        <Chip
+                          label="Sale"
+                          size="small"
+                          color="primary"
+                          sx={{ ml: 1 }}
+                        />
+                      )}
+                    </TableCell>
                     <TableCell>{employeeName || '-'}</TableCell>
                     <TableCell>
                       <Typography
@@ -574,22 +595,48 @@ function Finances() {
                         {parseFloat(record.amount).toFixed(2)}
                       </Typography>
                     </TableCell>
-                    <TableCell>{record.description || '-'}</TableCell>
+                    <TableCell>
+                      {isSale && record.payment_method ? (
+                        <Box>
+                          <Typography variant="body2">{record.description || '-'}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Payment: {record.payment_method}
+                          </Typography>
+                        </Box>
+                      ) : (
+                        record.description || '-'
+                      )}
+                    </TableCell>
                     <TableCell>
                       {record.expense_date
                         ? new Date(record.expense_date).toLocaleDateString()
                         : '-'}
                     </TableCell>
                     <TableCell>
-                      <IconButton
-                        size="small"
-                        onClick={() => handleOpen(record.type, record)}
-                      >
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton size="small" onClick={() => handleDelete(record.id)}>
-                        <DeleteIcon />
-                      </IconButton>
+                      {isSale ? (
+                        <Tooltip title="Sales are managed in the Sales page">
+                          <Box sx={{ display: 'flex', gap: 0.5 }}>
+                            <IconButton size="small" disabled>
+                              <EditIcon />
+                            </IconButton>
+                            <IconButton size="small" disabled>
+                              <DeleteIcon />
+                            </IconButton>
+                          </Box>
+                        </Tooltip>
+                      ) : (
+                        <>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpen(record.type, record)}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                          <IconButton size="small" onClick={() => handleDelete(record.id, record)}>
+                            <DeleteIcon />
+                          </IconButton>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

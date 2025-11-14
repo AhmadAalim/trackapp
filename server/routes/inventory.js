@@ -2,7 +2,7 @@ module.exports = (db, upload, uploadImage, path) => {
   const express = require('express');
   const XLSX = require('xlsx');
   const fs = require('fs');
-  const { generateSKUSimple, calculateFinalPrice } = require('../utils/skuGenerator');
+  const { generateSKUSimple, calculateFinalPrice, getNextSequentialNumberSync } = require('../utils/skuGenerator');
   const router = express.Router();
 
   // Auto-categorization helper based on product text
@@ -239,18 +239,42 @@ module.exports = (db, upload, uploadImage, path) => {
           // Auto-categorize product
           const derivedCategory = categorizeProduct(productName, productBarcode || '');
 
-          // Generate SKU using new format: [CATEGORY_PREFIX][ITEMCODE][COSTPRICE_LAST4]
-          const cost = parseFloat(costPrice) || 0;
-          const calculatedFinalPrice = calculateFinalPrice(cost);
-          const generatedSku = generateSKUSimple(derivedCategory || 'ITEM', cost, null, calculatedFinalPrice);
+          // Helper function to parse numbers from Excel (handles formatted numbers, commas, etc.)
+          const parseNumber = (value) => {
+            if (value === null || value === undefined || value === '') {
+              return null;
+            }
+            // Convert to string and remove common formatting (commas, spaces, currency symbols)
+            const cleaned = String(value).replace(/[,\s₪$€£]/g, '').trim();
+            const parsed = parseFloat(cleaned);
+            return isNaN(parsed) ? null : parsed;
+          };
+
+          // Parse cost and final price from Excel
+          // Cost Price → cost field
+          const cost = parseNumber(costPrice);
+          // Final Price → price field (selling price)
+          const finalPriceParsed = parseNumber(finalPrice);
+          
+          // Use final price from Excel if provided, otherwise calculate from cost
+          // Only calculate if we have a cost but no final price
+          const finalPriceValue = finalPriceParsed !== null 
+            ? finalPriceParsed 
+            : (cost !== null && cost !== undefined ? calculateFinalPrice(cost) : 0);
+          
+          // Use cost from Excel, or 0 if not provided
+          const costValue = cost !== null && cost !== undefined ? cost : 0;
+          
+          // For Excel import, use timestamp-based sequential to avoid conflicts during bulk import
+          const generatedSku = generateSKUSimple(derivedCategory || 'ITEM', costValue, null, finalPriceValue);
 
           const product = {
             name: productName, // Product Name goes to name field
             description: productBarcode || '', // Product Barcode goes to description field
             sku: generatedSku, // Generated SKU with cost price as last 4 digits
             category: derivedCategory,
-            price: parseFloat(finalPrice) || 0, // Final Price → price
-            cost: cost, // Cost Price → cost
+            price: finalPriceValue, // Final Price → price (use calculated value if Excel didn't provide it)
+            cost: costValue, // Cost Price → cost
             stock_quantity: parseInt(quantity) || 0, // Quantity → stock_quantity
             min_stock_level: 10, // Default minimum stock
             supplier_id: null,
@@ -279,9 +303,13 @@ module.exports = (db, upload, uploadImage, path) => {
 
           console.log(`Row ${index + 2}:`, {
             name: product.name,
+            cost: product.cost,
             price: product.price,
             stock: product.stock_quantity,
-            rawRow: row
+            costPriceFromExcel: costPrice,
+            finalPriceFromExcel: finalPrice,
+            parsedCost: cost,
+            parsedFinalPrice: finalPriceParsed
           });
 
           if (!product.name || product.name.trim() === '') {
@@ -302,17 +330,21 @@ module.exports = (db, upload, uploadImage, path) => {
             if (!existing) return false;
             
             const quantityToAdd = product.stock_quantity || 0;
+            // When updating, use new price/cost from Excel if provided (non-zero), otherwise keep existing values
+            const newPrice = (product.price && product.price > 0) ? product.price : existing.price || 0;
+            const newCost = (product.cost && product.cost > 0) ? product.cost : existing.cost || 0;
+            
             db.run(
               'UPDATE products SET stock_quantity = stock_quantity + ?, price = ?, cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-              [quantityToAdd, product.price, product.cost, existing.id],
+              [quantityToAdd, newPrice, newCost, existing.id],
               function(updateErr) {
                 if (updateErr) {
                   console.error(`Row ${index + 2} update error:`, updateErr.message);
-                recordFailure(`Row ${index + 2}: ${updateErr.message}`);
+                  recordFailure(`Row ${index + 2}: ${updateErr.message}`);
                   resolve();
                   return;
                 }
-                console.log(`Row ${index + 2}: Added ${quantityToAdd} to existing product "${product.name}" (ID: ${existing.id}). New total: ${(existing.stock_quantity || 0) + quantityToAdd}`);
+                console.log(`Row ${index + 2}: Added ${quantityToAdd} to existing product "${product.name}" (ID: ${existing.id}). New total: ${(existing.stock_quantity || 0) + quantityToAdd}, Price: ${newPrice}, Cost: ${newCost}`);
                 results.success++;
                 resolve();
               }
@@ -342,7 +374,7 @@ module.exports = (db, upload, uploadImage, path) => {
                       product.category || derivedCategory || 'ITEM',
                       product.cost,
                       randomItemCode,
-                      calculatedFinalPrice
+                      product.price
                     );
                     console.log(`Row ${index + 2}: SKU conflict, retrying with: ${uniqueSku}`);
                     insertProductRow(uniqueSku, retryCount + 1);
@@ -474,11 +506,30 @@ module.exports = (db, upload, uploadImage, path) => {
       ? category
       : categorizeProduct(productName, description || '');
 
-    // Generate SKU using new format: [CATEGORY_PREFIX][ITEMCODE][COSTPRICE_LAST4]
-    const generatedSku = generateSKUSimple(autoCategory || category || 'ITEM', productCost, null, computedFinalPrice);
+    // Use provided SKU if given, otherwise generate one
+    let productSku = sku && sku.trim() !== '' ? sku.trim() : null;
     
-    // Use provided SKU if given, otherwise use generated SKU
-    let productSku = sku && sku.trim() !== '' ? sku.trim() : generatedSku;
+    // Function to generate SKU and insert product
+    const generateAndInsertProduct = (retryCount = 0) => {
+      // If SKU already provided, use it
+      if (productSku) {
+        return insertProduct(productSku, retryCount);
+      }
+
+      // Get next sequential number from database
+      getNextSequentialNumberSync(db)
+        .then((sequentialNumber) => {
+          // Generate SKU with sequential number
+          const generatedSku = generateSKUSimple(autoCategory || category || 'ITEM', productCost, parseInt(sequentialNumber), computedFinalPrice);
+          insertProduct(generatedSku, retryCount);
+        })
+        .catch((err) => {
+          console.error('Error getting sequential number:', err);
+          // Fallback to timestamp-based if database query fails
+          const generatedSku = generateSKUSimple(autoCategory || category || 'ITEM', productCost, null, computedFinalPrice);
+          insertProduct(generatedSku, retryCount);
+        });
+    };
     
     // Function to insert with SKU handling
     const insertProduct = (skuToUse, retryCount = 0) => {
@@ -659,13 +710,13 @@ module.exports = (db, upload, uploadImage, path) => {
         if (e2) {
           console.error('Find-by-name error:', e2.message);
           // If search fails, try to insert anyway
-          return insertProduct(productSku);
+          return generateAndInsertProduct();
         }
         if (addQuantityToExisting(existingByName)) {
           return; // Quantity added successfully
         }
         // No existing product found - insert new
-        insertProduct(productSku);
+        generateAndInsertProduct();
       });
     };
 
