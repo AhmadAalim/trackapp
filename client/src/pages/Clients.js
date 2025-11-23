@@ -286,6 +286,7 @@ function Clients() {
           >
             Clients
           </Typography>
+          {/* Clients page - Track restaurant balances and transactions */}
           <Typography variant="body2" color="text.secondary">
             {clients.length} client{clients.length !== 1 ? 's' : ''} • 
             Total outstanding: <strong>{formatBalance(totalBalance)}</strong>
