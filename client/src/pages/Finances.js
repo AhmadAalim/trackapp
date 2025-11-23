@@ -419,9 +419,30 @@ function Finances() {
   }
 
   return (
-    <Container maxWidth="lg">
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Income/Expense Tracker</Typography>
+    <Container 
+      maxWidth="lg"
+      sx={{ 
+        px: { xs: 0, sm: 2 },
+        width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+      }}
+    >
+      <Box 
+        display="flex" 
+        justifyContent="space-between" 
+        alignItems={{ xs: 'flex-start', sm: 'center' }} 
+        mb={{ xs: 2, sm: 3 }}
+        flexDirection={{ xs: 'column', sm: 'row' }}
+        gap={2}
+        sx={{ px: { xs: 1, sm: 0 }, width: '100%' }}
+      >
+        <Typography 
+          variant="h4"
+          sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' } }}
+        >
+          Income/Expense Tracker
+        </Typography>
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Button
             variant="contained"
@@ -529,8 +550,18 @@ function Finances() {
         </Grid>
       </Grid>
 
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer 
+        component={Paper}
+        sx={{
+          maxHeight: { xs: '60vh', sm: 'none' },
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          width: '100%',
+          maxWidth: '100%',
+          mx: { xs: 1, sm: 0 },
+        }}
+      >
+        <Table stickyHeader>
           <TableHead>
             <TableRow>
               <TableCell>Type</TableCell>

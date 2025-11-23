@@ -25,6 +25,8 @@ import TableChartIcon from '@mui/icons-material/TableChart';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import BusinessCenterIcon from '@mui/icons-material/BusinessCenter';
 
 const drawerWidth = 240;
 
@@ -33,6 +35,8 @@ const menuItems = [
   { text: 'Inventory', icon: <InventoryIcon />, path: '/inventory' },
   { text: 'Items', icon: <Inventory2Icon />, path: '/items' },
   { text: 'Sales', icon: <PointOfSaleIcon />, path: '/sales' },
+  { text: 'Orders', icon: <ShoppingCartIcon />, path: '/orders' },
+  { text: 'Clients', icon: <BusinessCenterIcon />, path: '/clients' },
   { text: 'Employees', icon: <PeopleIcon />, path: '/employees' },
   { text: 'Suppliers', icon: <BusinessIcon />, path: '/suppliers' },
   { text: 'Income/Expense', icon: <AccountBalanceIcon />, path: '/finances' },
@@ -40,6 +44,9 @@ const menuItems = [
   { text: 'Excel Browser', icon: <TableChartIcon />, path: '/excel-browser' },
   { text: 'Sticker Generator', icon: <LocalOfferIcon />, path: '/stickers' },
 ];
+
+// Mobile-friendly drawer width
+const mobileDrawerWidth = 280;
 
 function Layout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -53,7 +60,17 @@ function Layout({ children }) {
   const drawer = (
     <Box>
       <Toolbar>
-        <Typography variant="h6" noWrap component="div">
+        <Typography 
+          variant="h6" 
+          noWrap 
+          component="div" 
+          sx={{ 
+            fontSize: { xs: '1.1rem', sm: '1.25rem' },
+            fontWeight: 700,
+            color: 'rgba(255, 255, 255, 0.95)',
+            textShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+          }}
+        >
           TrackApp
         </Typography>
       </Toolbar>
@@ -67,9 +84,20 @@ function Layout({ children }) {
                 navigate(item.path);
                 setMobileOpen(false);
               }}
+              sx={{
+                minHeight: { xs: 56, sm: 48 }, // Touch-friendly height on mobile
+                '&:hover': {
+                  backgroundColor: 'action.hover',
+                },
+              }}
             >
-              <ListItemIcon>{item.icon}</ListItemIcon>
-              <ListItemText primary={item.text} />
+              <ListItemIcon sx={{ minWidth: { xs: 48, sm: 40 } }}>{item.icon}</ListItemIcon>
+              <ListItemText 
+                primary={item.text} 
+                primaryTypographyProps={{
+                  fontSize: { xs: '0.95rem', sm: '0.875rem' }
+                }}
+              />
             </ListItemButton>
           </ListItem>
         ))}
@@ -78,32 +106,66 @@ function Layout({ children }) {
   );
 
   return (
-    <Box sx={{ display: 'flex' }}>
+    <Box 
+      sx={{ 
+        display: 'flex',
+        width: '100%',
+        maxWidth: '100vw',
+        overflowX: 'hidden',
+      }}
+    >
       <AppBar
         position="fixed"
         sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
+          width: { xs: '100%', sm: `calc(100% - ${drawerWidth}px)` },
+          ml: { xs: 0, sm: `${drawerWidth}px` },
+          zIndex: (theme) => theme.zIndex.drawer + 1,
+          background: 'rgba(255, 255, 255, 0.2) !important',
+          backdropFilter: 'blur(20px)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.3)',
+          boxShadow: '0 4px 16px 0 rgba(31, 38, 135, 0.1)',
         }}
       >
-        <Toolbar>
+        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 }, px: { xs: 1, sm: 2 } }}>
           <IconButton
             color="inherit"
             aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { sm: 'none' } }}
+            sx={{ 
+              mr: 2, 
+              display: { sm: 'none' },
+              minWidth: 48,
+              minHeight: 48,
+            }}
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" noWrap component="div">
+          <Typography 
+            variant="h6" 
+            noWrap 
+            component="div"
+            sx={{ 
+              fontSize: { xs: '0.9rem', sm: '1.25rem' },
+              fontWeight: 700,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              maxWidth: { xs: 'calc(100vw - 100px)', sm: 'none' },
+              color: 'rgba(255, 255, 255, 0.95)',
+              textShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+            }}
+          >
             Store Management System
           </Typography>
         </Toolbar>
       </AppBar>
       <Box
         component="nav"
-        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
+        sx={{ 
+          width: { xs: 0, sm: drawerWidth }, 
+          flexShrink: { xs: 0, sm: 0 },
+          display: { xs: 'none', sm: 'block' },
+        }}
       >
         <Drawer
           variant="temporary"
@@ -114,7 +176,11 @@ function Layout({ children }) {
           }}
           sx={{
             display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            '& .MuiDrawer-paper': { 
+              boxSizing: 'border-box', 
+              width: mobileDrawerWidth,
+              maxWidth: '85vw',
+            },
           }}
         >
           {drawer}
@@ -123,7 +189,10 @@ function Layout({ children }) {
           variant="permanent"
           sx={{
             display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            '& .MuiDrawer-paper': { 
+              boxSizing: 'border-box', 
+              width: drawerWidth,
+            },
           }}
           open
         >
@@ -134,12 +203,19 @@ function Layout({ children }) {
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          p: { xs: 1, sm: 3 },
+          width: { xs: '100%', sm: `calc(100% - ${drawerWidth}px)` },
+          minHeight: '100vh',
+          background: 'transparent',
+          maxWidth: { xs: '100vw', sm: 'none' },
+          overflowX: 'hidden',
+          position: 'relative',
         }}
       >
         <Toolbar />
-        {children}
+        <Box sx={{ width: '100%', maxWidth: '100%', overflowX: 'hidden' }}>
+          {children}
+        </Box>
       </Box>
     </Box>
   );

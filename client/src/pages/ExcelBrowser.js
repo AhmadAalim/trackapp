@@ -691,9 +691,19 @@ function ExcelBrowser() {
   };
 
   return (
-    <Container maxWidth="xl" sx={{ pt: 0, px: { xs: 1.5, sm: 2 } }}>
+    <Container 
+      maxWidth="xl" 
+      sx={{ 
+        pt: 0, 
+        px: { xs: 0, sm: 2 },
+        width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+      }}
+    >
       <Box
         display="flex"
+        sx={{ px: { xs: 1, sm: 0 }, width: '100%' }}
         justifyContent="space-between"
         alignItems="flex-start"
         flexWrap="wrap"
@@ -967,7 +977,15 @@ Sheets: ${entry.sheetCount ?? 0} • Rows: ${entry.totalRows ?? 0}`}
             </Box>
           )}
           {(columns.length > 0 || data.length > 0) ? (
-            <TableContainer sx={{ maxHeight: '70vh' }}>
+            <TableContainer 
+              sx={{ 
+                maxHeight: { xs: '60vh', sm: '70vh' },
+                overflowX: 'auto',
+                WebkitOverflowScrolling: 'touch',
+                width: '100%',
+                maxWidth: '100%',
+              }}
+            >
                 <Table stickyHeader>
                   <TableHead>
                     <TableRow>
@@ -1085,7 +1103,15 @@ Sheets: ${entry.sheetCount ?? 0} • Rows: ${entry.totalRows ?? 0}`}
           </Box>
         </DialogTitle>
         <DialogContent>
-          <TableContainer sx={{ maxHeight: '60vh' }}>
+          <TableContainer 
+            sx={{ 
+              maxHeight: { xs: '50vh', sm: '60vh' },
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
+              width: '100%',
+              maxWidth: '100%',
+            }}
+          >
             <Table stickyHeader>
               <TableHead>
                 <TableRow>

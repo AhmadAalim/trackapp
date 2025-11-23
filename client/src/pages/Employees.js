@@ -135,51 +135,96 @@ function Employees() {
   }
 
   return (
-    <Container maxWidth="lg">
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Employees</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpen()}>
+    <Container 
+      maxWidth="lg" 
+      sx={{ 
+        px: { xs: 0, sm: 2 },
+        width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+      }}
+    >
+      <Box 
+        display="flex" 
+        justifyContent="space-between" 
+        alignItems={{ xs: 'flex-start', sm: 'center' }} 
+        mb={{ xs: 2, sm: 3 }}
+        flexDirection={{ xs: 'column', sm: 'row' }}
+        gap={2}
+        sx={{ px: { xs: 1, sm: 0 }, width: '100%' }}
+      >
+        <Typography 
+          variant="h4"
+          sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' } }}
+        >
+          Employees
+        </Typography>
+        <Button 
+          variant="contained" 
+          startIcon={<AddIcon />} 
+          onClick={() => handleOpen()}
+          fullWidth={{ xs: true, sm: false }}
+          sx={{ minWidth: { xs: '100%', sm: 'auto' } }}
+        >
           Add Employee
         </Button>
       </Box>
 
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer 
+        component={Paper}
+        sx={{
+          maxHeight: { xs: '60vh', sm: 'none' },
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          width: '100%',
+          maxWidth: '100%',
+          mx: { xs: 1, sm: 0 },
+        }}
+      >
+        <Table stickyHeader>
           <TableHead>
             <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell>Email</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>Position</TableCell>
-              <TableCell>Monthly Balance</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>Name</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', md: 'table-cell' } }}>Email</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', lg: 'table-cell' } }}>Phone</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>Position</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>Monthly Balance</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>Status</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {employees.map((employee) => (
               <TableRow key={employee.id}>
-                <TableCell>{employee.name}</TableCell>
-                <TableCell>{employee.email}</TableCell>
-                <TableCell>{employee.phone}</TableCell>
-                <TableCell>{employee.position}</TableCell>
-                <TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{employee.name}</TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', md: 'table-cell' } }}>{employee.email}</TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', lg: 'table-cell' } }}>{employee.phone}</TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{employee.position}</TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     ₪{parseFloat(employee.balance_remaining ?? (employee.monthly_allowance || 0)).toFixed(2)} remaining
                   </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
                     Withdrawn: ₪{parseFloat(employee.total_withdrawn || 0).toFixed(2)} / Allowance: ₪{parseFloat(employee.monthly_allowance || employee.salary || 0).toFixed(2)}
                   </Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
                     Resets monthly
                   </Typography>
                 </TableCell>
-                <TableCell>{employee.status}</TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>{employee.status}</TableCell>
                 <TableCell>
-                  <IconButton size="small" onClick={() => handleOpen(employee)}>
+                  <IconButton 
+                    size="small" 
+                    onClick={() => handleOpen(employee)}
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  >
                     <EditIcon />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(employee.id)}>
+                  <IconButton 
+                    size="small" 
+                    onClick={() => handleDelete(employee.id)}
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  >
                     <DeleteIcon />
                   </IconButton>
                 </TableCell>
@@ -189,7 +234,19 @@ function Employees() {
         </Table>
       </TableContainer>
 
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <Dialog 
+        open={open} 
+        onClose={handleClose} 
+        maxWidth="sm" 
+        fullWidth
+        fullScreen={{ xs: true, sm: false }}
+        PaperProps={{
+          sx: {
+            m: { xs: 0, sm: 2 },
+            maxHeight: { xs: '100%', sm: '90vh' },
+          }
+        }}
+      >
         <DialogTitle>{editing ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
@@ -247,9 +304,20 @@ function Employees() {
             />
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained">
+        <DialogActions sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 2, sm: 2 }, flexDirection: { xs: 'column-reverse', sm: 'row' }, gap: 1 }}>
+          <Button 
+            onClick={handleClose}
+            fullWidth={{ xs: true, sm: false }}
+            sx={{ m: 0 }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSubmit} 
+            variant="contained"
+            fullWidth={{ xs: true, sm: false }}
+            sx={{ m: 0 }}
+          >
             {editing ? 'Update' : 'Create'}
           </Button>
         </DialogActions>

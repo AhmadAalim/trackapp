@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   Container,
   Paper,
@@ -41,6 +41,7 @@ import * as XLSX from 'xlsx';
 import Alert from '@mui/material/Alert';
 import { inventoryAPI } from '../services/api';
 import GenerateStickersButton from '../components/GenerateStickersButton';
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 
 const DELETE_ALL_PASSWORD = process.env.REACT_APP_DELETE_ALL_PASSWORD || '1111';
 
@@ -68,6 +69,28 @@ function Inventory() {
   const [sortOption, setSortOption] = useState('nameAsc');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockFilter, setStockFilter] = useState('all');
+  const [scannerActive, setScannerActive] = useState(false);
+  const searchInputRef = useRef(null);
+  
+  // Barcode scanner integration
+  const handleBarcodeScan = useCallback((barcode) => {
+    setScannerActive(true);
+    setSearchTerm(barcode);
+    // Auto-focus search field
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+    // Clear scanner indicator after 2 seconds
+    setTimeout(() => setScannerActive(false), 2000);
+  }, []);
+
+  useBarcodeScanner(handleBarcodeScan, {
+    enabled: true,
+    minLength: 3,
+    maxLength: 50,
+    timeout: 100,
+  });
+
   const totalProducts = products.length;
   const lowStockProducts = useMemo(
     () =>
@@ -725,11 +748,36 @@ function Inventory() {
   }
 
   return (
-    <Container maxWidth="lg">
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
+    <Container 
+      maxWidth="lg" 
+      sx={{ 
+        px: { xs: 0, sm: 2 },
+        width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+      }}
+    >
+      <Box 
+        display="flex" 
+        justifyContent="space-between" 
+        alignItems={{ xs: 'flex-start', sm: 'center' }} 
+        mb={{ xs: 2, sm: 3 }} 
+        flexDirection={{ xs: 'column', sm: 'row' }}
+        gap={2}
+        sx={{ px: { xs: 1, sm: 0 }, width: '100%' }}
+      >
         <Box>
-          <Typography variant="h4">Inventory</Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography 
+            variant="h4"
+            sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' }, mb: 0.5 }}
+          >
+            Inventory
+          </Typography>
+          <Typography 
+            variant="body2" 
+            color="text.secondary"
+            sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}
+          >
           {(() => {
             if (activeTab === 'lowStock') {
               return `Low stock products: ${lowStockProducts.length}`;
@@ -743,10 +791,18 @@ function Inventory() {
             ` • Showing ${displayedProductsCount} match${displayedProductsCount === 1 ? '' : 'es'}`}
           </Typography>
         </Box>
-        <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
+        <Box 
+          display="flex" 
+          gap={{ xs: 1, sm: 2 }} 
+          alignItems="center" 
+          flexWrap="wrap"
+          width={{ xs: '100%', sm: 'auto' }}
+          sx={{ maxWidth: '100%' }}
+        >
           {/* Search Bar */}
           <TextField
-            placeholder="Search products..."
+            inputRef={searchInputRef}
+            placeholder="Search products... (or scan barcode)"
             variant="outlined"
             size="small"
             value={searchTerm}
@@ -757,11 +813,59 @@ function Inventory() {
                   <SearchIcon />
                 </InputAdornment>
               ),
+              endAdornment: scannerActive ? (
+                <InputAdornment position="end">
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                      px: 1,
+                      py: 0.5,
+                      borderRadius: 1,
+                      background: 'rgba(0, 122, 255, 0.2)',
+                      color: '#007AFF',
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: '#007AFF',
+                        animation: 'pulse 1s infinite',
+                        '@keyframes pulse': {
+                          '0%, 100%': { opacity: 1 },
+                          '50%': { opacity: 0.5 },
+                        },
+                      }}
+                    />
+                    <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 600 }}>
+                      Scanner
+                    </Typography>
+                  </Box>
+                </InputAdornment>
+              ) : undefined,
             }}
-            sx={{ minWidth: 250 }}
+            sx={{ 
+              minWidth: { xs: '100%', sm: 250 },
+              flex: { xs: '1 1 100%', sm: '0 1 auto' },
+              maxWidth: '100%',
+              '& .MuiOutlinedInput-root': {
+                border: scannerActive ? '2px solid #007AFF' : undefined,
+                boxShadow: scannerActive ? '0 0 0 3px rgba(0, 122, 255, 0.2)' : undefined,
+                transition: 'all 0.3s ease',
+              },
+            }}
           />
 
-          <FormControl size="small" sx={{ minWidth: 160 }}>
+          <FormControl 
+            size="small" 
+            sx={{ 
+              minWidth: { xs: 'calc(50% - 4px)', sm: 160 },
+              flex: { xs: '1 1 calc(50% - 4px)', sm: '0 1 auto' },
+            }}
+          >
             <InputLabel>Category</InputLabel>
             <Select
               value={categoryFilter}
@@ -777,7 +881,13 @@ function Inventory() {
             </Select>
           </FormControl>
 
-          <FormControl size="small" sx={{ minWidth: 160 }}>
+          <FormControl 
+            size="small" 
+            sx={{ 
+              minWidth: { xs: 'calc(50% - 4px)', sm: 160 },
+              flex: { xs: '1 1 calc(50% - 4px)', sm: '0 1 auto' },
+            }}
+          >
             <InputLabel>Stock Status</InputLabel>
             <Select
               value={stockFilter}
@@ -791,7 +901,13 @@ function Inventory() {
             </Select>
           </FormControl>
 
-          <FormControl size="small" sx={{ minWidth: 160 }}>
+          <FormControl 
+            size="small" 
+            sx={{ 
+              minWidth: { xs: '100%', sm: 160 },
+              flex: { xs: '1 1 100%', sm: '0 1 auto' },
+            }}
+          >
             <InputLabel>Sort By</InputLabel>
             <Select
               value={sortOption}
@@ -814,6 +930,8 @@ function Inventory() {
               color="error"
               startIcon={<DeleteSweepIcon />}
               onClick={handleDeleteAll}
+              fullWidth={{ xs: true, sm: false }}
+              sx={{ flex: { xs: '1 1 100%', sm: '0 1 auto' } }}
             >
               Delete All
             </Button>
@@ -826,18 +944,24 @@ function Inventory() {
               startIcon={<FileDownloadIcon />}
               onClick={handleExportRestockList}
               disabled={restockProducts.length === 0}
+              fullWidth={{ xs: true, sm: false }}
+              sx={{ flex: { xs: '1 1 100%', sm: '0 1 auto' } }}
             >
               Export Restock List
             </Button>
           )}
 
-          <GenerateStickersButton />
+          <Box sx={{ width: { xs: '100%', sm: 'auto' } }}>
+            <GenerateStickersButton />
+          </Box>
 
           {/* Add Product Button */}
         <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => handleOpen()}
+          fullWidth={{ xs: true, sm: false }}
+          sx={{ flex: { xs: '1 1 100%', sm: '0 1 auto' } }}
         >
           Add Product
         </Button>
@@ -986,8 +1110,18 @@ function Inventory() {
         </Paper>
       )}
 
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer 
+        component={Paper}
+        sx={{
+          maxHeight: { xs: '60vh', sm: 'none' },
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          width: '100%',
+          maxWidth: '100%',
+          mx: { xs: 1, sm: 0 },
+        }}
+      >
+        <Table stickyHeader>
           <TableHead>
             <TableRow>
               <TableCell>Image</TableCell>
@@ -1069,15 +1203,24 @@ function Inventory() {
                         size="small"
                         onClick={() => handleToggleRestock(product.id)}
                         color={isInRestock ? 'primary' : 'default'}
+                        sx={{ minWidth: 44, minHeight: 44 }}
                       >
                         {isInRestock ? <RemoveCircleOutlineIcon /> : <PlaylistAddIcon />}
                       </IconButton>
                     </span>
                   </Tooltip>
-                  <IconButton size="small" onClick={() => handleOpen(product)}>
+                  <IconButton 
+                    size="small" 
+                    onClick={() => handleOpen(product)}
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  >
                     <EditIcon />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(product.id)}>
+                  <IconButton 
+                    size="small" 
+                    onClick={() => handleDelete(product.id)}
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  >
                     <DeleteIcon />
                   </IconButton>
                 </TableCell>
@@ -1089,25 +1232,42 @@ function Inventory() {
         </Table>
       </TableContainer>
 
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-        <DialogTitle>{editing ? 'Edit Product' : 'Add Product'}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+      <Dialog 
+        open={open} 
+        onClose={handleClose} 
+        maxWidth="sm" 
+        fullWidth
+        fullScreen={{ xs: true, sm: false }}
+        PaperProps={{
+          sx: {
+            m: { xs: 0, sm: 2 },
+            maxHeight: { xs: '100%', sm: '90vh' },
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
+          {editing ? 'Edit Product' : 'Add Product'}
+        </DialogTitle>
+        <DialogContent sx={{ pt: { xs: 2, sm: 2 } }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Image Upload */}
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
               {imagePreview ? (
                 <Avatar
                   src={imagePreview}
                   alt="Product preview"
-                  sx={{ width: 120, height: 120 }}
+                  sx={{ width: { xs: 100, sm: 120 }, height: { xs: 100, sm: 120 } }}
                   variant="rounded"
                 />
               ) : (
-                <Avatar sx={{ width: 120, height: 120 }} variant="rounded">
+                <Avatar 
+                  sx={{ width: { xs: 100, sm: 120 }, height: { xs: 100, sm: 120 } }} 
+                  variant="rounded"
+                >
                   No Image
                 </Avatar>
               )}
-              <label>
+              <label style={{ width: '100%' }}>
                 <input
                   type="file"
                   accept="image/*"
@@ -1148,7 +1308,7 @@ function Inventory() {
               value={formData.stock_quantity}
               onChange={(e) => setFormData({ ...formData, stock_quantity: e.target.value })}
             />
-            <Box sx={{ display: 'flex', gap: 2 }}>
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
               <TextField
                 label="Cost Price"
                 type="number"
@@ -1176,9 +1336,20 @@ function Inventory() {
               />
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained">
+        <DialogActions sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 2, sm: 2 }, flexDirection: { xs: 'column-reverse', sm: 'row' }, gap: 1 }}>
+          <Button 
+            onClick={handleClose}
+            fullWidth={{ xs: true, sm: false }}
+            sx={{ m: 0 }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSubmit} 
+            variant="contained"
+            fullWidth={{ xs: true, sm: false }}
+            sx={{ m: 0 }}
+          >
             {editing ? 'Update' : 'Create'}
           </Button>
         </DialogActions>

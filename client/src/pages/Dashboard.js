@@ -56,80 +56,108 @@ const SectionCard = ({ title, description, icon, color = 'primary', stats = [], 
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={handleKeyDown}
       sx={{
-        p: 3,
+        p: { xs: 2, sm: 3 },
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        gap: 2,
+        gap: { xs: 1.5, sm: 2 },
         cursor: onClick ? 'pointer' : 'default',
-        borderRadius: 3,
-        border: '1px solid',
-        borderColor: (theme) => theme.palette.divider,
-        transition: 'all 0.2s ease-in-out',
+        borderRadius: '20px',
+        background: 'rgba(255, 255, 255, 0.25)',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255, 255, 255, 0.3)',
+        boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.15)',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         outline: 'none',
-        '&:hover': (theme) =>
-          onClick
-            ? {
-                transform: 'translateY(-4px)',
-                boxShadow: 6,
-                borderColor: theme.palette[color]?.main ?? theme.palette.primary.main,
-              }
-            : {},
-        '&:focus-visible': (theme) =>
-          onClick
-            ? {
-                boxShadow: 6,
-                borderColor: theme.palette[color]?.main ?? theme.palette.primary.main,
-              }
-            : {},
+        minHeight: { xs: 140, sm: 'auto' },
+        '&:hover': onClick
+          ? {
+              transform: { xs: 'none', sm: 'translateY(-6px) scale(1.02)' },
+              boxShadow: '0 12px 40px 0 rgba(31, 38, 135, 0.25)',
+              background: 'rgba(255, 255, 255, 0.35)',
+              border: '1px solid rgba(255, 255, 255, 0.5)',
+            }
+          : {},
+        '&:focus-visible': onClick
+          ? {
+              boxShadow: '0 12px 40px 0 rgba(31, 38, 135, 0.25)',
+              border: '1px solid rgba(255, 255, 255, 0.6)',
+            }
+          : {},
+        '&:active': onClick ? { transform: 'scale(0.98)' } : {},
       }}
     >
-      <Box display="flex" alignItems="center" gap={2}>
+      <Box display="flex" alignItems="center" gap={{ xs: 1.5, sm: 2 }}>
         <Box
           sx={{
-            width: 56,
-            height: 56,
-            borderRadius: 2,
+            width: { xs: 48, sm: 56 },
+            height: { xs: 48, sm: 56 },
+            borderRadius: '16px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: (theme) => theme.palette[color]?.light ?? theme.palette.primary.light,
-            color: (theme) => theme.palette[color]?.dark ?? theme.palette.primary.dark,
+            background: 'rgba(255, 255, 255, 0.4)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.5)',
+            boxShadow: '0 4px 16px 0 rgba(0, 0, 0, 0.1)',
+            color: (theme) => theme.palette[color]?.main ?? theme.palette.primary.main,
+            flexShrink: 0,
           }}
         >
           {icon}
         </Box>
-        <Box>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              fontWeight: 600,
+              fontSize: { xs: '1rem', sm: '1.25rem' },
+            }}
+          >
             {title}
           </Typography>
           {description && (
-            <Typography variant="body2" color="text.secondary">
+            <Typography 
+              variant="body2" 
+              color="text.secondary"
+              sx={{
+                fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                display: { xs: 'none', sm: 'block' },
+              }}
+            >
               {description}
             </Typography>
           )}
         </Box>
       </Box>
 
-      <Box display="flex" flexDirection="column" gap={1.5} mt={1}>
+      <Box display="flex" flexDirection="column" gap={{ xs: 1, sm: 1.5 }} mt={{ xs: 0.5, sm: 1 }}>
         {stats.map((stat) => (
           <Box
             key={stat.label}
             display="flex"
             alignItems="center"
             justifyContent="space-between"
+            sx={{ gap: 1 }}
           >
-            <Typography variant="body2" color="text.secondary">
+            <Typography 
+              variant="body2" 
+              color="text.secondary"
+              sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}
+            >
               {stat.label}
             </Typography>
             <Typography
               variant="body1"
               sx={{
                 fontWeight: 600,
+                fontSize: { xs: '0.875rem', sm: '1rem' },
                 color: (theme) =>
                   stat.highlight
                     ? theme.palette[stat.highlight]?.main ?? theme.palette.text.primary
                     : theme.palette.text.primary,
+                textAlign: 'right',
+                wordBreak: 'break-word',
               }}
             >
               {stat.value}
@@ -183,17 +211,34 @@ function Dashboard() {
   }
 
   return (
-    <Container maxWidth="lg">
-      <Typography variant="h4" gutterBottom sx={{ mb: 3 }}>
+    <Container 
+      maxWidth="lg" 
+      sx={{ 
+        px: { xs: 0, sm: 2 },
+        width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+      }}
+    >
+      <Typography 
+        variant="h4" 
+        gutterBottom 
+        sx={{ 
+          mb: { xs: 2, sm: 3 },
+          fontSize: { xs: '1.5rem', sm: '2.125rem' },
+          fontWeight: 600,
+          px: { xs: 1, sm: 0 },
+        }}
+      >
         Dashboard
       </Typography>
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
+      <Grid container spacing={{ xs: 1.5, sm: 3 }} sx={{ width: '100%', mx: 0 }}>
+        <Grid item xs={12} sm={6} md={6}>
           <SectionCard
             title="Sales"
             description="Monitor revenue trends and daily performance."
             color="success"
-            icon={<SalesIcon sx={{ fontSize: 30 }} />}
+            icon={<SalesIcon sx={{ fontSize: { xs: 28, sm: 30 } }} />}
             onClick={() => navigate('/sales')}
             stats={[
               {
@@ -207,12 +252,12 @@ function Dashboard() {
             ]}
           />
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} sm={6} md={6}>
           <SectionCard
             title="Suppliers"
             description="Review purchasing partners and relationships."
             color="info"
-            icon={<BusinessIcon sx={{ fontSize: 30 }} />}
+            icon={<BusinessIcon sx={{ fontSize: { xs: 28, sm: 30 } }} />}
             onClick={() => navigate('/suppliers')}
             stats={[
               {
@@ -222,12 +267,12 @@ function Dashboard() {
             ]}
           />
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} sm={6} md={6}>
           <SectionCard
             title="Employees"
             description="Track staff activity and availability."
             color="secondary"
-            icon={<PeopleIcon sx={{ fontSize: 30 }} />}
+            icon={<PeopleIcon sx={{ fontSize: { xs: 28, sm: 30 } }} />}
             onClick={() => navigate('/employees')}
             stats={[
               {
@@ -237,12 +282,12 @@ function Dashboard() {
             ]}
           />
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} sm={6} md={6}>
           <SectionCard
             title="Products & Inventory"
             description="Jump to inventory for detailed stock control."
             color="primary"
-            icon={<InventoryIcon sx={{ fontSize: 30 }} />}
+            icon={<InventoryIcon sx={{ fontSize: { xs: 28, sm: 30 } }} />}
             onClick={() => navigate('/inventory')}
             stats={[
               {
@@ -261,12 +306,12 @@ function Dashboard() {
             ]}
           />
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} sm={6} md={6}>
           <SectionCard
             title="Finances"
             description="Track income, expenses, and cash flow."
             color="warning"
-            icon={<AccountBalanceIcon sx={{ fontSize: 30 }} />}
+            icon={<AccountBalanceIcon sx={{ fontSize: { xs: 28, sm: 30 } }} />}
             onClick={() => navigate('/finances')}
             stats={[
               {

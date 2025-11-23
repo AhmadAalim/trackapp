@@ -60,6 +60,27 @@ export const salesAPI = {
   delete: (id) => api.delete(`/sales/${id}`),
 };
 
+// Orders API
+export const ordersAPI = {
+  getAll: (params) => api.get('/orders', { params }),
+  getById: (id) => api.get(`/orders/${id}`),
+  create: (data) => api.post('/orders', data),
+  update: (id, data) => api.put(`/orders/${id}`, data),
+  updateStatus: (id, status) => api.patch(`/orders/${id}/status`, { status }),
+  delete: (id) => api.delete(`/orders/${id}`),
+};
+
+// Clients API
+export const clientsAPI = {
+  getAll: () => api.get('/clients'),
+  getById: (id) => api.get(`/clients/${id}`),
+  create: (data) => api.post('/clients', data),
+  update: (id, data) => api.put(`/clients/${id}`, data),
+  addTransaction: (id, data) => api.post(`/clients/${id}/transactions`, data),
+  deleteTransaction: (transactionId) => api.delete(`/clients/transactions/${transactionId}`),
+  delete: (id) => api.delete(`/clients/${id}`),
+};
+
 // Employees API
 export const employeesAPI = {
   getAll: () => api.get('/employees'),

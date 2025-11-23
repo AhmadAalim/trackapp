@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   Box,
   Button,
@@ -24,6 +24,7 @@ import PrintIcon from '@mui/icons-material/Print';
 import ShareIcon from '@mui/icons-material/Share';
 import Barcode from 'react-barcode';
 import { inventoryAPI } from '../services/api';
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 
 const stickerSizes = {
   '40x30': {
@@ -31,12 +32,24 @@ const stickerSizes = {
     widthCm: 4,
     heightCm: 3,
     columns: { xs: 1, sm: 2, md: 3, lg: 4 },
+    barcodeWidth: 1.2,
+    barcodeHeight: 50,
+    fontSize: 12,
+    nameFontSize: '0.75rem',
+    skuFontSize: '0.65rem',
+    priceFontSize: '0.7rem',
   },
   '15x30': {
     label: '15 × 30 mm',
     widthCm: 3,
     heightCm: 1.5,
     columns: { xs: 2, sm: 4, md: 6, lg: 8 },
+    barcodeWidth: 0.8,
+    barcodeHeight: 30,
+    fontSize: 10,
+    nameFontSize: '0.6rem',
+    skuFontSize: '0.55rem',
+    priceFontSize: '0.6rem',
   },
 };
 
@@ -49,6 +62,28 @@ const StickerGenerator = () => {
   const [shareStatus, setShareStatus] = useState(null);
   const [selectedSize, setSelectedSize] = useState('40x30');
   const [selectionInitialized, setSelectionInitialized] = useState(false);
+  const [scannerActive, setScannerActive] = useState(false);
+  const searchInputRef = useRef(null);
+
+  // Barcode scanner integration
+  const handleBarcodeScan = useCallback((barcode) => {
+    setScannerActive(true);
+    setSearchTerm(barcode);
+    // Auto-focus search field
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+    // Clear scanner indicator after 2 seconds
+    setTimeout(() => setScannerActive(false), 2000);
+  }, []);
+
+  useBarcodeScanner(handleBarcodeScan, {
+    enabled: true,
+    minLength: 3,
+    maxLength: 50,
+    timeout: 100,
+    ignoreInputs: false, // Allow scanning even when search field is focused
+  });
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -92,9 +127,27 @@ const StickerGenerator = () => {
     const selectedSet = new Set(selectedIds);
     return filteredProducts.filter((product) => product.id && selectedSet.has(product.id));
   }, [filteredProducts, selectedIds]);
+
+  // Expand selected products by stock quantity for sticker generation
+  const stickersToGenerate = useMemo(() => {
+    const stickers = [];
+    selectedProducts.forEach((product) => {
+      const stockQuantity = Number(product.stock_quantity ?? 0);
+      const quantity = stockQuantity > 0 ? stockQuantity : 1; // At least 1 sticker even if stock is 0
+      for (let i = 0; i < quantity; i++) {
+        stickers.push({
+          ...product,
+          stickerIndex: i + 1, // Track which sticker number this is (1, 2, 3, etc.)
+        });
+      }
+    });
+    return stickers;
+  }, [selectedProducts]);
+
   const totalProducts = products.length;
   const filteredCount = filteredProducts.length;
   const selectedCount = selectedProducts.length;
+  const totalStickers = stickersToGenerate.length;
 
   const toggleSelection = (id) => {
     if (!id) return;
@@ -134,6 +187,10 @@ const StickerGenerator = () => {
       alert('Please select at least one product to print stickers.');
       return;
     }
+    if (totalStickers === 0) {
+      alert('No stickers to print. Selected products have no stock quantity.');
+      return;
+    }
     window.print();
   };
 
@@ -142,7 +199,9 @@ const StickerGenerator = () => {
       .map((product) => {
         const price = Number(product.price ?? product.selling_price ?? 0).toFixed(2);
         const barcode = product.description || 'N/A';
-        return `${product.name} | SKU: ${product.sku || 'N/A'} | Barcode: ${barcode} | ₪${price}`;
+        const stockQuantity = Number(product.stock_quantity ?? 0);
+        const quantity = stockQuantity > 0 ? stockQuantity : 1;
+        return `${product.name} (${quantity}x) | SKU: ${product.sku || 'N/A'} | Barcode: ${barcode} | ₪${price}`;
       })
       .join('\n');
   };
@@ -198,7 +257,15 @@ const StickerGenerator = () => {
   }
 
   return (
-    <Container maxWidth="xl">
+    <Container 
+      maxWidth="xl"
+      sx={{ 
+        px: { xs: 0, sm: 2 },
+        width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+      }}
+    >
       <style>{`
         @media print {
           body * {
@@ -220,56 +287,138 @@ const StickerGenerator = () => {
           .sticker-card {
             width: ${stickerSizes[selectedSize].widthCm}cm !important;
             min-height: ${stickerSizes[selectedSize].heightCm}cm !important;
+            max-width: ${stickerSizes[selectedSize].widthCm}cm !important;
+            max-height: ${stickerSizes[selectedSize].heightCm}cm !important;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .sticker-card svg {
+            max-width: 100% !important;
+            height: auto !important;
           }
         }
       `}</style>
-      <Box className="no-print" mb={3} display="flex" flexDirection={{ xs: 'column', md: 'row' }} gap={2} alignItems={{ xs: 'stretch', md: 'center' }}>
-        <Box sx={{ flexGrow: 1 }}>
-          <Typography variant="h4">
+      <Box 
+        className="no-print" 
+        mb={3} 
+        display="flex" 
+        flexDirection={{ xs: 'column', md: 'row' }} 
+        gap={{ xs: 1.5, md: 1 }} 
+        alignItems={{ xs: 'stretch', md: 'center' }}
+        flexWrap="wrap"
+      >
+        <Box sx={{ flexGrow: 1, minWidth: { xs: '100%', md: '200px' } }}>
+          <Typography variant="h4" sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' } }}>
             Sticker Generator
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Total products: {totalProducts} • Showing: {filteredCount} • Selected: {selectedCount}
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+            Total products: {totalProducts} • Showing: {filteredCount} • Selected: {selectedCount} • Stickers to print: {totalStickers}
           </Typography>
         </Box>
         <TextField
+          inputRef={searchInputRef}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search by name, SKU, barcode or category"
+          placeholder="Search... (or scan barcode)"
           size="small"
-          sx={{ minWidth: 240 }}
+          sx={{ 
+            minWidth: { xs: '100%', sm: 180, md: 200 },
+            maxWidth: { xs: '100%', md: 250 },
+            '& .MuiOutlinedInput-root': {
+              border: scannerActive ? '2px solid #007AFF' : undefined,
+              boxShadow: scannerActive ? '0 0 0 3px rgba(0, 122, 255, 0.2)' : undefined,
+              transition: 'all 0.3s ease',
+            },
+          }}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
-                <SearchIcon />
+                <SearchIcon fontSize="small" />
               </InputAdornment>
             ),
+            endAdornment: scannerActive ? (
+              <InputAdornment position="end">
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    px: 1,
+                    py: 0.5,
+                    borderRadius: 1,
+                    background: 'rgba(0, 122, 255, 0.2)',
+                    color: '#007AFF',
+                    mr: 1,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: '#007AFF',
+                      animation: 'pulse 1s infinite',
+                      '@keyframes pulse': {
+                        '0%, 100%': { opacity: 1 },
+                        '50%': { opacity: 0.5 },
+                      },
+                    }}
+                  />
+                  <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 600 }}>
+                    Scanner
+                  </Typography>
+                </Box>
+              </InputAdornment>
+            ) : undefined,
           }}
         />
-        <Button variant="outlined" startIcon={<SelectAllIcon />} onClick={selectAll}>
+        <Button 
+          variant="outlined" 
+          size="small"
+          startIcon={<SelectAllIcon />} 
+          onClick={selectAll}
+          sx={{ minWidth: 'auto', px: { xs: 1.5, sm: 2 } }}
+        >
           Select All
         </Button>
-        <Button variant="outlined" startIcon={<ClearAllIcon />} onClick={clearSelection}>
-          Clear Selection
+        <Button 
+          variant="outlined" 
+          size="small"
+          startIcon={<ClearAllIcon />} 
+          onClick={clearSelection}
+          sx={{ minWidth: 'auto', px: { xs: 1.5, sm: 2 } }}
+        >
+          Clear
         </Button>
         <Button
           variant="contained"
           color="primary"
+          size="small"
           startIcon={<PrintIcon />}
           onClick={() => handlePrint('40x30')}
+          sx={{ minWidth: 'auto', px: { xs: 1.5, sm: 2 } }}
         >
-          Print 40 × 30 mm
+          40×30
         </Button>
         <Button
           variant="contained"
           color="primary"
+          size="small"
           startIcon={<PrintIcon />}
           onClick={() => handlePrint('15x30')}
+          sx={{ minWidth: 'auto', px: { xs: 1.5, sm: 2 } }}
         >
-          Print 15 × 30 mm
+          15×30
         </Button>
-        <Button variant="contained" color="secondary" startIcon={<ShareIcon />} onClick={handleShare}>
-          Share Stickers
+        <Button 
+          variant="contained" 
+          color="secondary" 
+          size="small"
+          startIcon={<ShareIcon />} 
+          onClick={handleShare}
+          sx={{ minWidth: 'auto', px: { xs: 1.5, sm: 2 } }}
+        >
+          Share
         </Button>
       </Box>
 
@@ -344,57 +493,135 @@ const StickerGenerator = () => {
           },
         }}
       >
-        {selectedProducts.map((product) => {
+        {stickersToGenerate.map((product, index) => {
           const barcodeValue = product.description || product.sku || '';
           const sellingPrice = Number(product.price ?? product.selling_price ?? 0).toFixed(2);
+          const sizeConfig = stickerSizes[selectedSize];
 
           return (
             <Paper
-              key={`sticker-${product.id}`}
+              key={`sticker-${product.id}-${product.stickerIndex || index}`}
               elevation={3}
               sx={{
-                p: 2,
+                p: { xs: 0.5, sm: 1 },
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: stickerSizes[selectedSize].heightCm * 28,
+                justifyContent: 'space-between',
+                minHeight: sizeConfig.heightCm * 28,
                 width: '100%',
+                overflow: 'hidden',
+                boxSizing: 'border-box',
               }}
               className="sticker-card"
             >
-              <Typography variant="subtitle1" sx={{ fontWeight: 600, textAlign: 'center', mb: 1 }}>
+              {/* Product Name */}
+              <Typography 
+                sx={{ 
+                  fontWeight: 600, 
+                  textAlign: 'center', 
+                  fontSize: sizeConfig.nameFontSize,
+                  lineHeight: 1.2,
+                  mb: 0.5,
+                  px: 0.5,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  maxWidth: '100%',
+                }}
+              >
                 {product.name}
               </Typography>
-              {barcodeValue ? (
-                <Barcode
-                  value={barcodeValue}
-                  width={1.5}
-                  height={60}
-                  displayValue
-                  fontSize={14}
-                  margin={4}
-                />
-              ) : (
-                <Typography variant="caption" color="text.secondary">
-                  No barcode
+              
+              {/* Barcode - Responsive to sticker size */}
+              <Box 
+                sx={{ 
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '100%',
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  flex: 1,
+                  my: 0.5,
+                  minHeight: sizeConfig.barcodeHeight * 0.8,
+                }}
+              >
+                {barcodeValue ? (
+                  <Box
+                    sx={{
+                      width: '100%',
+                      maxWidth: '100%',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      overflow: 'hidden',
+                      '& svg': {
+                        maxWidth: '100%',
+                        height: 'auto',
+                      },
+                    }}
+                  >
+                    <Barcode
+                      value={barcodeValue}
+                      width={sizeConfig.barcodeWidth}
+                      height={sizeConfig.barcodeHeight}
+                      displayValue={false}
+                      fontSize={sizeConfig.fontSize}
+                      margin={1}
+                      format="CODE128"
+                    />
+                  </Box>
+                ) : (
+                  <Typography 
+                    variant="caption" 
+                    color="text.secondary"
+                    sx={{ fontSize: sizeConfig.skuFontSize }}
+                  >
+                    No barcode
+                  </Typography>
+                )}
+              </Box>
+              
+              {/* SKU and Price */}
+              <Box 
+                mt={0.5} 
+                width="100%" 
+                display="flex" 
+                justifyContent="space-between"
+                alignItems="center"
+                sx={{ px: 0.5 }}
+              >
+                <Typography 
+                  sx={{ 
+                    fontWeight: 600,
+                    fontSize: sizeConfig.skuFontSize,
+                    lineHeight: 1,
+                  }}
+                >
+                  {product.sku || 'N/A'}
                 </Typography>
-              )}
-              <Box mt={1} width="100%" display="flex" justifyContent="space-between">
-                <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                  SKU: {product.sku || 'N/A'}
-                </Typography>
-                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                <Typography 
+                  sx={{ 
+                    fontWeight: 600,
+                    fontSize: sizeConfig.priceFontSize,
+                    lineHeight: 1,
+                  }}
+                >
                   ₪{sellingPrice}
                 </Typography>
               </Box>
             </Paper>
           );
         })}
-        {selectedProducts.length === 0 && (
+        {stickersToGenerate.length === 0 && (
           <Paper sx={{ p: 4, textAlign: 'center' }}>
             <Typography variant="body2" color="text.secondary">
-              No products selected. Use the table above to choose which stickers to generate.
+              {selectedProducts.length === 0 
+                ? 'No products selected. Use the table above to choose which stickers to generate.'
+                : 'Selected products have no stock quantity. Please select products with stock to generate stickers.'}
             </Typography>
           </Paper>
         )}

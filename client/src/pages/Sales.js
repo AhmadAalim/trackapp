@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Container,
   Paper,
@@ -31,6 +31,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import { salesAPI, inventoryAPI, employeesAPI } from '../services/api';
 import { createFilterOptions } from '@mui/material/Autocomplete';
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 
 function Sales() {
   const [sales, setSales] = useState([]);
@@ -47,6 +48,9 @@ function Sales() {
     items: [{ product_id: '', quantity: 1, unit_price: 0 }],
   });
   const [showNotes, setShowNotes] = useState(false);
+  const [scannerActive, setScannerActive] = useState(false);
+  const [lastScannedBarcode, setLastScannedBarcode] = useState('');
+  const autocompleteRefs = useRef({});
 
   const productFilterOptions = createFilterOptions({
     matchFrom: 'any',
@@ -191,6 +195,52 @@ function Sales() {
     });
   };
 
+  // Helper to find product by barcode
+  const findProductByBarcode = useCallback((barcode) => {
+    return products.find((p) =>
+      [p.description, p.sku, p.barcode, String(p.id)]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase() === barcode.toLowerCase())
+    );
+  }, [products]);
+
+  // Barcode scanner integration for Sales
+  const handleBarcodeScan = useCallback((barcode) => {
+    if (!open) return; // Only scan when dialog is open
+    
+    setScannerActive(true);
+    setLastScannedBarcode(barcode);
+    
+    // Find product by barcode
+    const barcodeMatch = findProductByBarcode(barcode);
+
+    if (barcodeMatch) {
+      // Find first empty item slot or add new item
+      const emptyIndex = formData.items.findIndex((item) => !item.product_id);
+      const targetIndex = emptyIndex !== -1 ? emptyIndex : formData.items.length - 1;
+      
+      handleProductSelect(targetIndex, barcodeMatch);
+      
+      // If no empty slot, add a new item
+      if (emptyIndex === -1) {
+        addItem();
+      }
+    }
+
+    // Clear scanner indicator after 2 seconds
+    setTimeout(() => {
+      setScannerActive(false);
+      setLastScannedBarcode('');
+    }, 2000);
+  }, [open, findProductByBarcode, formData.items, handleProductSelect, addItem]);
+
+  useBarcodeScanner(handleBarcodeScan, {
+    enabled: open, // Only enable when dialog is open
+    minLength: 3,
+    maxLength: 50,
+    timeout: 100,
+  });
+
   const removeItem = (index) => {
     const newItems = formData.items.filter((_, i) => i !== index);
     setFormData({ ...formData, items: newItems });
@@ -261,42 +311,105 @@ function Sales() {
   }
 
   return (
-    <Container maxWidth="lg">
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Sales</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpen}>
+    <Container 
+      maxWidth="lg" 
+      sx={{ 
+        px: { xs: 0, sm: 2 },
+        width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+      }}
+    >
+      <Box 
+        display="flex" 
+        justifyContent="space-between" 
+        alignItems={{ xs: 'flex-start', sm: 'center' }} 
+        mb={{ xs: 2, sm: 3 }}
+        flexDirection={{ xs: 'column', sm: 'row' }}
+        gap={2}
+        sx={{ px: { xs: 1, sm: 0 }, width: '100%' }}
+      >
+        <Typography 
+          variant="h4"
+          sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' } }}
+        >
+          Sales
+        </Typography>
+        <Button 
+          variant="contained" 
+          startIcon={<AddIcon />} 
+          onClick={handleOpen}
+          fullWidth={{ xs: true, sm: false }}
+          sx={{ minWidth: { xs: '100%', sm: 'auto' } }}
+        >
           New Sale
         </Button>
       </Box>
 
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer 
+        component={Paper}
+        sx={{
+          maxHeight: { xs: '60vh', sm: 'none' },
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          width: '100%',
+          maxWidth: '100%',
+          mx: { xs: 1, sm: 0 },
+        }}
+      >
+        <Table stickyHeader>
           <TableHead>
             <TableRow>
-              <TableCell>Date</TableCell>
-              <TableCell>Total</TableCell>
-                <TableCell>Payment Method</TableCell>
-              <TableCell>Employee</TableCell>
-              <TableCell>Items</TableCell>
-                <TableCell>Actions</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>Date</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>Total</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>Payment Method</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', md: 'table-cell' } }}>Employee</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>Items</TableCell>
+              <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {sales.map((sale) => (
               <TableRow key={sale.id}>
-                <TableCell>{new Date(sale.sale_date).toLocaleDateString()}</TableCell>
-                <TableCell>₪{parseFloat(sale.total_amount).toFixed(2)}</TableCell>
-                <TableCell>{sale.payment_method}</TableCell>
-                <TableCell>{sale.employee_name || 'N/A'}</TableCell>
-                <TableCell>{sale.item_count || 0}</TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                  {new Date(sale.sale_date).toLocaleDateString()}
+                </TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, fontWeight: 600 }}>
+                  ₪{parseFloat(sale.total_amount).toFixed(2)}
+                </TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>
+                  {sale.payment_method}
+                </TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', md: 'table-cell' } }}>
+                  {sale.employee_name || 'N/A'}
+                </TableCell>
+                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                  {sale.item_count || 0}
+                </TableCell>
                 <TableCell>
-                  <IconButton size="small" onClick={() => handleViewSale(sale.id)} title="View">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => handleViewSale(sale.id)} 
+                    title="View"
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  >
                     <VisibilityIcon />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleEditSale(sale.id)} title="Edit">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => handleEditSale(sale.id)} 
+                    title="Edit"
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  >
                     <EditIcon />
                   </IconButton>
-                  <IconButton size="small" color="error" onClick={() => handleDeleteSale(sale.id)} title="Delete">
+                  <IconButton 
+                    size="small" 
+                    color="error" 
+                    onClick={() => handleDeleteSale(sale.id)} 
+                    title="Delete"
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  >
                     <DeleteIcon />
                   </IconButton>
                 </TableCell>
@@ -306,10 +419,24 @@ function Sales() {
         </Table>
       </TableContainer>
 
-      <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
-        <DialogTitle>{editingSaleId ? 'Edit Sale' : 'New Sale'}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1.5 }}>
+      <Dialog 
+        open={open} 
+        onClose={handleClose} 
+        maxWidth="md" 
+        fullWidth
+        fullScreen={{ xs: true, sm: false }}
+        PaperProps={{
+          sx: {
+            m: { xs: 0, sm: 2 },
+            maxHeight: { xs: '100%', sm: '90vh' },
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
+          {editingSaleId ? 'Edit Sale' : 'New Sale'}
+        </DialogTitle>
+        <DialogContent sx={{ pt: { xs: 2, sm: 1.5 } }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                 Payment Method
@@ -319,6 +446,13 @@ function Sales() {
                 exclusive
                 value={formData.payment_method}
                 onChange={(_, value) => value && setFormData({ ...formData, payment_method: value })}
+                fullWidth={{ xs: true, sm: false }}
+                sx={{ 
+                  '& .MuiToggleButton-root': {
+                    minHeight: 44,
+                    fontSize: { xs: '0.875rem', sm: '0.875rem' },
+                  }
+                }}
               >
                 <ToggleButton value="cash">Cash</ToggleButton>
                 <ToggleButton value="card">Card</ToggleButton>
@@ -363,6 +497,9 @@ function Sales() {
                   }}
                 >
                   <Autocomplete
+                    ref={(el) => {
+                      if (el) autocompleteRefs.current[index] = el;
+                    }}
                     options={products}
                     value={selectedProduct || null}
                     onChange={(_, value) => handleProductSelect(index, value)}
@@ -376,11 +513,7 @@ function Sales() {
                     onInputChange={(_, value, reason) => {
                       if (reason === 'input' && value) {
                         const normalized = value.trim().toLowerCase();
-                        const barcodeMatch = products.find((p) =>
-                          [p.description, p.sku, p.barcode]
-                            .filter(Boolean)
-                            .some((field) => String(field).toLowerCase() === normalized)
-                        );
+                        const barcodeMatch = findProductByBarcode(normalized);
                         if (barcodeMatch) {
                           handleProductSelect(index, barcodeMatch);
                         }
@@ -391,7 +524,49 @@ function Sales() {
                         {...params}
                         label="Product"
                         size="small"
-                        placeholder="Scan or search barcode"
+                        placeholder={scannerActive && lastScannedBarcode ? `Scanned: ${lastScannedBarcode}` : "Scan or search barcode"}
+                        InputProps={{
+                          ...params.InputProps,
+                          endAdornment: scannerActive && index === 0 ? (
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 0.5,
+                                px: 1,
+                                py: 0.5,
+                                borderRadius: 1,
+                                background: 'rgba(0, 122, 255, 0.2)',
+                                color: '#007AFF',
+                                mr: 1,
+                              }}
+                            >
+                              <Box
+                                sx={{
+                                  width: 8,
+                                  height: 8,
+                                  borderRadius: '50%',
+                                  background: '#007AFF',
+                                  animation: 'pulse 1s infinite',
+                                  '@keyframes pulse': {
+                                    '0%, 100%': { opacity: 1 },
+                                    '50%': { opacity: 0.5 },
+                                  },
+                                }}
+                              />
+                              <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 600 }}>
+                                Scanner
+                              </Typography>
+                            </Box>
+                          ) : params.InputProps.endAdornment,
+                        }}
+                        sx={{
+                          '& .MuiOutlinedInput-root': {
+                            border: scannerActive && index === 0 ? '2px solid #007AFF' : undefined,
+                            boxShadow: scannerActive && index === 0 ? '0 0 0 3px rgba(0, 122, 255, 0.2)' : undefined,
+                            transition: 'all 0.3s ease',
+                          },
+                        }}
                       />
                     )}
                   />
@@ -415,9 +590,14 @@ function Sales() {
                   />
 
                   {formData.items.length > 1 && (
-                    <IconButton color="error" size="small" onClick={() => removeItem(index)}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                  <IconButton 
+                    color="error" 
+                    size="small" 
+                    onClick={() => removeItem(index)}
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
                   )}
                 </Box>
               );
@@ -435,6 +615,7 @@ function Sales() {
                 <IconButton
                   size="small"
                   onClick={() => setShowNotes((prev) => !prev)}
+                  sx={{ minWidth: 44, minHeight: 44 }}
                   color={showNotes || formData.notes ? 'primary' : 'default'}
                 >
                   <EditNoteIcon fontSize="small" />
@@ -455,15 +636,38 @@ function Sales() {
             )}
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained">
+        <DialogActions sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 2, sm: 2 }, flexDirection: { xs: 'column-reverse', sm: 'row' }, gap: 1 }}>
+          <Button 
+            onClick={handleClose}
+            fullWidth={{ xs: true, sm: false }}
+            sx={{ m: 0 }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSubmit} 
+            variant="contained"
+            fullWidth={{ xs: true, sm: false }}
+            sx={{ m: 0 }}
+          >
             Complete Sale
           </Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!viewSale} onClose={() => setViewSale(null)} maxWidth="sm" fullWidth>
+      <Dialog 
+        open={!!viewSale} 
+        onClose={() => setViewSale(null)} 
+        maxWidth="sm" 
+        fullWidth
+        fullScreen={{ xs: true, sm: false }}
+        PaperProps={{
+          sx: {
+            m: { xs: 0, sm: 2 },
+            maxHeight: { xs: '100%', sm: '90vh' },
+          }
+        }}
+      >
         <DialogTitle>Sale Details</DialogTitle>
         <DialogContent>
           {viewSale && (
@@ -486,8 +690,14 @@ function Sales() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setViewSale(null)}>Close</Button>
+        <DialogActions sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 2, sm: 2 } }}>
+          <Button 
+            onClick={() => setViewSale(null)}
+            fullWidth={{ xs: true, sm: false }}
+            variant="contained"
+          >
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
     </Container>

@@ -80,6 +80,8 @@ app.use('/uploads', express.static(uploadsDir));
 // Routes
 const inventoryRoutes = require('./routes/inventory')(db, upload, uploadImage, path);
 const salesRoutes = require('./routes/sales')(db);
+const ordersRoutes = require('./routes/orders')(db);
+const clientsRoutes = require('./routes/clients')(db);
 const employeesRoutes = require('./routes/employees')(db);
 const suppliersRoutes = require('./routes/suppliers')(db);
 const reportsRoutes = require('./routes/reports')(db);
@@ -93,6 +95,8 @@ const stickerRoutes = require('./routes/stickers')(db);
 app.use('/api/auth', authRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/sales', salesRoutes);
+app.use('/api/orders', ordersRoutes);
+app.use('/api/clients', clientsRoutes);
 app.use('/api/employees', employeesRoutes);
 app.use('/api/suppliers', suppliersRoutes);
 app.use('/api/reports', reportsRoutes);

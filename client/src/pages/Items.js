@@ -32,6 +32,7 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import { BrowserMultiFormatReader, BrowserCodeReader } from '@zxing/browser';
 import { NotFoundException } from '@zxing/library';
 import { inventoryAPI } from '../services/api';
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 
 const DEFAULT_API_BASE = 'http://localhost:5001/api';
 const API_ROOT = (process.env.REACT_APP_API_URL || DEFAULT_API_BASE).replace(/\/api\/?$/, '');
@@ -98,6 +99,8 @@ function Items() {
   const [error, setError] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState(null);
+  const [scannerActive, setScannerActive] = useState(false);
+  const searchInputRef = useRef(null);
 
   const videoRef = useRef(null);
   const codeReaderRef = useRef(null);
@@ -107,6 +110,26 @@ function Items() {
 
   const hasActiveSearch = useMemo(() => activeSearch.trim().length > 0, [activeSearch]);
   const totalMatches = products.length;
+
+  // Barcode scanner gun integration
+  const handleBarcodeScan = useCallback((barcode) => {
+    setScannerActive(true);
+    setSearchInput(barcode);
+    setActiveSearch(barcode);
+    // Auto-focus search field
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+    // Clear scanner indicator after 2 seconds
+    setTimeout(() => setScannerActive(false), 2000);
+  }, []);
+
+  useBarcodeScanner(handleBarcodeScan, {
+    enabled: true,
+    minLength: 3,
+    maxLength: 50,
+    timeout: 100,
+  });
 
   const fetchProducts = useCallback(
     async (searchTerm) => {
@@ -306,9 +329,19 @@ function Items() {
   }, [scannerOpen, handleScannerClose]);
 
   return (
-    <Container maxWidth="lg">
+    <Container 
+      maxWidth="lg"
+      sx={{ 
+        px: { xs: 0, sm: 2 },
+        width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+      }}
+    >
       <Box
         sx={{
+          px: { xs: 1, sm: 0 },
+          width: '100%',
           display: 'flex',
           flexDirection: 'column',
           gap: 1,
@@ -339,11 +372,12 @@ function Items() {
           }}
         >
           <TextField
+            inputRef={searchInputRef}
             fullWidth
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search by product name, barcode, SKU, special code, or category"
+            placeholder="Search by product name, barcode, SKU, special code, or category (or scan barcode)"
             label="Find a product"
             InputProps={{
               startAdornment: (
@@ -351,13 +385,53 @@ function Items() {
                   <SearchIcon />
                 </InputAdornment>
               ),
-              endAdornment: searchInput ? (
+              endAdornment: scannerActive ? (
+                <InputAdornment position="end">
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                      px: 1,
+                      py: 0.5,
+                      borderRadius: 1,
+                      background: 'rgba(0, 122, 255, 0.2)',
+                      color: '#007AFF',
+                      mr: 1,
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: '#007AFF',
+                        animation: 'pulse 1s infinite',
+                        '@keyframes pulse': {
+                          '0%, 100%': { opacity: 1 },
+                          '50%': { opacity: 0.5 },
+                        },
+                      }}
+                    />
+                    <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 600 }}>
+                      Scanner
+                    </Typography>
+                  </Box>
+                </InputAdornment>
+              ) : searchInput ? (
                 <InputAdornment position="end">
                   <IconButton aria-label="clear search" onClick={handleClear} edge="end">
                     <ClearIcon />
                   </IconButton>
                 </InputAdornment>
               ) : undefined,
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                border: scannerActive ? '2px solid #007AFF' : undefined,
+                boxShadow: scannerActive ? '0 0 0 3px rgba(0, 122, 255, 0.2)' : undefined,
+                transition: 'all 0.3s ease',
+              },
             }}
           />
           <Button

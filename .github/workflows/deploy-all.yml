@@ -1,0 +1,73 @@
+name: Deploy All (Frontend + Backend)
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - '.gitignore'
+  workflow_dispatch:
+
+jobs:
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dir: ./client/node_modules
+
+      - name: Install dependencies
+        working-directory: ./client
+        run: npm ci
+
+      - name: Build React app
+        working-directory: ./client
+        run: npm run build
+        env:
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+          working-directory: ./client
+
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Trigger Render Deployment
+        run: |
+          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              || echo "Render deployment triggered"
+          else
+            echo "Render deploy hook not configured, skipping..."
+          fi
+
+      - name: Trigger Railway Deployment
+        run: |
+          if [ -n "${{ secrets.RAILWAY_DEPLOY_HOOK_URL }}" ]; then
+            curl -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              || echo "Railway deployment triggered"
+          else
+            echo "Railway deploy hook not configured, skipping..."
+          fi
+

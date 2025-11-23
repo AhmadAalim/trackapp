@@ -130,6 +130,67 @@ class CompatibleDB {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
           )`);
+          
+          // Orders table
+          sqliteDB.run(`CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_number TEXT UNIQUE NOT NULL,
+            order_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            customer_name TEXT NOT NULL,
+            customer_phone TEXT,
+            customer_email TEXT,
+            delivery_address TEXT,
+            total_amount REAL NOT NULL,
+            payment_method TEXT,
+            notes TEXT,
+            source TEXT DEFAULT 'manual',
+            employee_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+          )`);
+          
+          // Order items table
+          sqliteDB.run(`CREATE TABLE IF NOT EXISTS order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL,
+            unit_price REAL NOT NULL,
+            total_price REAL NOT NULL,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (product_id) REFERENCES products(id)
+          )`);
+          
+          // Clients table
+          sqliteDB.run(`CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            contact_person TEXT,
+            email TEXT,
+            phone TEXT,
+            address TEXT,
+            balance REAL DEFAULT 0 NOT NULL,
+            notes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          )`);
+          
+          // Client transactions table
+          sqliteDB.run(`CREATE TABLE IF NOT EXISTS client_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            transaction_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            description TEXT,
+            related_order_id INTEGER,
+            related_sale_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+            FOREIGN KEY (related_order_id) REFERENCES orders(id),
+            FOREIGN KEY (related_sale_id) REFERENCES sales(id)
+          )`);
         });
       }
     }
