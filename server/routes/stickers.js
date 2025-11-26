@@ -51,6 +51,7 @@ module.exports = (db) => {
         barcodeHeight: 60,
       },
     },
+    // Niimbot D110 compatible sizes (203 DPI)
     '12x30': {
       width: 12,
       height: 30,
@@ -72,7 +73,6 @@ module.exports = (db) => {
         barcodeHeight: 50,
       },
     },
-    // Niimbot D110 compatible sizes (203 DPI)
     '12x40': {
       width: 12,
       height: 40,

@@ -52,7 +52,7 @@ const stickerSizes = {
     priceFontSize: '0.6rem',
   },
   '12x30': {
-    label: '12 × 30 mm',
+    label: '12 × 30 mm (Niimbot D110)',
     widthCm: 1.2,
     heightCm: 3,
     columns: { xs: 2, sm: 4, md: 6, lg: 8 },
@@ -445,6 +445,20 @@ const StickerGenerator = () => {
           sx={{ minWidth: 'auto', px: { xs: 1.5, sm: 2 } }}
         >
           15×30
+        </Button>
+        <Button
+          variant="contained"
+          color="success"
+          size="small"
+          startIcon={<PrintIcon />}
+          onClick={() => handlePrint('12x30')}
+          sx={{ 
+            minWidth: 'auto', 
+            px: { xs: 1.5, sm: 2 },
+          }}
+          title="Print 12×30mm stickers for Niimbot D110"
+        >
+          12×30 (D110)
         </Button>
         <Button
           variant="contained"

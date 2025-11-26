@@ -21,7 +21,7 @@ import { stickersAPI } from '../services/api';
 const SIZE_OPTIONS = [
   { value: '30x40', label: '30 × 40 mm' },
   { value: '15x30', label: '15 × 30 mm' },
-  { value: '12x30', label: '12 × 30 mm' },
+  { value: '12x30', label: '12 × 30 mm (Niimbot D110)' },
   { value: '12x40', label: '12 × 40 mm (Niimbot D110)' },
   { value: '15x50', label: '15 × 50 mm (Niimbot D110)' },
 ];
