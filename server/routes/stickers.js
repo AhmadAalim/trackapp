@@ -51,6 +51,27 @@ module.exports = (db) => {
         barcodeHeight: 60,
       },
     },
+    '12x30': {
+      width: 12,
+      height: 30,
+      gap: 2,
+      innerMargin: 1,
+      nameFont: 7,
+      skuFont: 5,
+      priceFont: 10,
+      barcodeHeight: 8,
+      barcodeScale: 1,
+      zpl: {
+        nameFont: 18,
+        skuFont: 12,
+        priceFont: 20,
+        nameY: 8,
+        skuY: 40,
+        barcodeY: 70,
+        priceY: 140,
+        barcodeHeight: 50,
+      },
+    },
   };
 
   const getProducts = () =>

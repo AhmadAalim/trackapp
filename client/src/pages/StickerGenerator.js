@@ -410,6 +410,26 @@ const StickerGenerator = () => {
         >
           15×30
         </Button>
+        <Button
+          variant="contained"
+          color="success"
+          size="small"
+          startIcon={<PrintIcon />}
+          onClick={() => {
+            console.log('12x30 button clicked');
+            handlePrint('12x30');
+          }}
+          sx={{ 
+            minWidth: 'auto', 
+            px: { xs: 1.5, sm: 2 },
+            display: 'flex',
+            visibility: 'visible',
+            opacity: 1
+          }}
+          title="Print 12×30mm stickers for selected items (Niimbot compatible)"
+        >
+          12×30
+        </Button>
         <Button 
           variant="contained" 
           color="secondary" 
