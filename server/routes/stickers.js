@@ -72,6 +72,49 @@ module.exports = (db) => {
         barcodeHeight: 50,
       },
     },
+    // Niimbot D110 compatible sizes (203 DPI)
+    '12x40': {
+      width: 12,
+      height: 40,
+      gap: 2,
+      innerMargin: 1,
+      nameFont: 7,
+      skuFont: 5,
+      priceFont: 10,
+      barcodeHeight: 10,
+      barcodeScale: 1,
+      zpl: {
+        nameFont: 18,
+        skuFont: 12,
+        priceFont: 20,
+        nameY: 8,
+        skuY: 50,
+        barcodeY: 90,
+        priceY: 190,
+        barcodeHeight: 60,
+      },
+    },
+    '15x50': {
+      width: 15,
+      height: 50,
+      gap: 2,
+      innerMargin: 1.5,
+      nameFont: 9,
+      skuFont: 7,
+      priceFont: 14,
+      barcodeHeight: 12,
+      barcodeScale: 1.5,
+      zpl: {
+        nameFont: 24,
+        skuFont: 16,
+        priceFont: 28,
+        nameY: 12,
+        skuY: 60,
+        barcodeY: 100,
+        priceY: 240,
+        barcodeHeight: 80,
+      },
+    },
   };
 
   const getProducts = () =>
@@ -262,8 +305,9 @@ module.exports = (db) => {
 
   const generateZplContent = (stickers, sizeKey) => {
     const spec = STICKER_SPECS[sizeKey];
-    const widthDots = mmToDots(spec.width);
-    const heightDots = mmToDots(spec.height);
+    // Niimbot D110 uses 203 DPI
+    const widthDots = mmToDots(spec.width, 203);
+    const heightDots = mmToDots(spec.height, 203);
 
     return stickers
       .map((product) => {
@@ -273,16 +317,21 @@ module.exports = (db) => {
         const barcode = escapeZpl(product.barcode || product.sku || '');
         const type = resolveBarcodeType(barcode);
         const barcodeHeight = spec.zpl.barcodeHeight || 70;
-        const barcodeCommand =
-          type === 'ean13' ? `^BEN,${barcodeHeight},Y,N,N` : `^BCN,${barcodeHeight},Y,N,N`;
+        
+        // Use CODE128 for better compatibility with Niimbot D110
+        const barcodeCommand = type === 'ean13' 
+          ? `^BEN,${barcodeHeight},Y,N,N` 
+          : `^BCN,${barcodeHeight},Y,N,N`;
 
         const barcodeBlock = barcode
           ? `^FO10,${spec.zpl.barcodeY}${barcodeCommand}
 ^FD${barcode}^FS`
           : '';
 
+        // Optimized ZPL for Niimbot D110 thermal printer (203 DPI)
         return (
           `^XA
+^CF0,${spec.zpl.nameFont}
 ^PW${widthDots}
 ^LL${heightDots}
 ^FO10,${spec.zpl.nameY}^A0N,${spec.zpl.nameFont},${spec.zpl.nameFont}^FD${name}^FS

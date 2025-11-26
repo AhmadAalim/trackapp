@@ -51,6 +51,42 @@ const stickerSizes = {
     skuFontSize: '0.55rem',
     priceFontSize: '0.6rem',
   },
+  '12x30': {
+    label: '12 × 30 mm',
+    widthCm: 1.2,
+    heightCm: 3,
+    columns: { xs: 2, sm: 4, md: 6, lg: 8 },
+    barcodeWidth: 0.7,
+    barcodeHeight: 25,
+    fontSize: 9,
+    nameFontSize: '0.55rem',
+    skuFontSize: '0.5rem',
+    priceFontSize: '0.55rem',
+  },
+  '12x40': {
+    label: '12 × 40 mm (Niimbot D110)',
+    widthCm: 1.2,
+    heightCm: 4,
+    columns: { xs: 2, sm: 4, md: 6, lg: 8 },
+    barcodeWidth: 0.7,
+    barcodeHeight: 35,
+    fontSize: 9,
+    nameFontSize: '0.55rem',
+    skuFontSize: '0.5rem',
+    priceFontSize: '0.55rem',
+  },
+  '15x50': {
+    label: '15 × 50 mm (Niimbot D110)',
+    widthCm: 1.5,
+    heightCm: 5,
+    columns: { xs: 2, sm: 3, md: 5, lg: 6 },
+    barcodeWidth: 0.9,
+    barcodeHeight: 40,
+    fontSize: 10,
+    nameFontSize: '0.6rem',
+    skuFontSize: '0.55rem',
+    priceFontSize: '0.65rem',
+  },
 };
 
 const StickerGenerator = () => {
@@ -415,20 +451,28 @@ const StickerGenerator = () => {
           color="success"
           size="small"
           startIcon={<PrintIcon />}
-          onClick={() => {
-            console.log('12x30 button clicked');
-            handlePrint('12x30');
-          }}
+          onClick={() => handlePrint('12x40')}
           sx={{ 
             minWidth: 'auto', 
             px: { xs: 1.5, sm: 2 },
-            display: 'flex',
-            visibility: 'visible',
-            opacity: 1
           }}
-          title="Print 12×30mm stickers for selected items (Niimbot compatible)"
+          title="Print 12×40mm stickers for Niimbot D110"
         >
-          12×30
+          12×40 (D110)
+        </Button>
+        <Button
+          variant="contained"
+          color="success"
+          size="small"
+          startIcon={<PrintIcon />}
+          onClick={() => handlePrint('15x50')}
+          sx={{ 
+            minWidth: 'auto', 
+            px: { xs: 1.5, sm: 2 },
+          }}
+          title="Print 15×50mm stickers for Niimbot D110"
+        >
+          15×50 (D110)
         </Button>
         <Button 
           variant="contained" 
